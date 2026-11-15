@@ -1,0 +1,9 @@
+/.env
+/.rwt-deploy/
+/.rwt-deploy.*/
+/.agents/
+/frontend_1/.claude/
+/Rimworld-Together/
+/postgresql_1/postgres-docker/.env
+/data/
+__pycache__/

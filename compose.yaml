@@ -1,0 +1,128 @@
+name: rimworld-together-on-vps-nonprod
+
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-16.4}
+    restart: unless-stopped
+    env_file: ${RWT_POSTGRES_ENV_FILE:-./postgresql_1/postgres-docker/.env}
+    environment:
+      RIMWORLD_API_DB_PASSWORD: ${RIMWORLD_API_DB_PASSWORD:?RIMWORLD_API_DB_PASSWORD is required}
+      PGTZ: ${TZ:-Asia/Bangkok}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgresql_1/postgres-docker/sql:/docker-entrypoint-initdb.d:ro
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  web:
+    build:
+      context: ./frontend_1
+    ports:
+      - "127.0.0.1:${RIMWORLD_WEB_PORT:-10005}:3000"
+    restart: unless-stopped
+    env_file: ${RWT_WEB_ENV_FILE:-./frontend_1/.env}
+    environment:
+      TZ: ${TZ:-Asia/Bangkok}
+      RIMWORLD_API_URL: http://api:8000
+      RIMWORLD_API_TOKEN: ${RIMWORLD_API_TOKEN:?RIMWORLD_API_TOKEN is required}
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 8
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./apps/api
+      target: api
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${RIMWORLD_API_DB_NAME:-app_db}
+      PGUSER: rimworld_api
+      PGPASSWORD: ${RIMWORLD_API_DB_PASSWORD:?RIMWORLD_API_DB_PASSWORD is required}
+      RIMWORLD_API_TOKEN: ${RIMWORLD_API_TOKEN:?RIMWORLD_API_TOKEN is required}
+      RIMWORLD_HOST_BIND: ${RIMWORLD_HOST_BIND:-127.0.0.1}
+      RIMWORLD_PUBLIC_HOST: ${RIMWORLD_PUBLIC_HOST:-}
+      RIMWORLD_HOST_PORT: ${RIMWORLD_HOST_PORT:-25555}
+    volumes:
+      - ${RWT_GAME_DATA:-./data/nonprod/rimworld}:/game:ro
+      - game_bridge:/bridge
+    networks:
+      - app_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz', timeout=2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 8
+
+  beekeeper:
+    build: ./infra/beekeeper
+    ports:
+      - "127.0.0.1:${BEEKEEPER_WEB_PORT:-5800}:5800"
+    volumes:
+      - beekeeper_config:/config
+    networks:
+      - app_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '^/opt/beekeeper-studio/beekeeper-studio-bin ' >/dev/null && curl -fsS http://127.0.0.1:5800/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
+  rimworld:
+    build:
+      context: ./apps/api
+      target: rimworld
+    ports:
+      - "${RIMWORLD_HOST_BIND:-127.0.0.1}:${RIMWORLD_HOST_PORT:-25555}:25555/tcp"
+    volumes:
+      - ${RWT_GAME_DATA:-./data/nonprod/rimworld}:/Data
+      - game_bridge:/bridge
+    networks:
+      - app_network
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "/usr/bin/python3", "-c", "import json; from datetime import datetime, timezone; b=json.load(open('/bridge/boot.json')); assert b['status']=='ready' and (datetime.now(timezone.utc)-datetime.fromisoformat(b['heartbeat_at'])).total_seconds()<10"]
+      interval: 5s
+      timeout: 3s
+      retries: 8
+      start_period: 8s
+    stop_grace_period: 20s
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  beekeeper_config:
+  game_bridge:
+
+networks:
+  app_network:

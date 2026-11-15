@@ -1,0 +1,19 @@
+services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:${RIMWORLD_WEB_PORT:-10005}:3000"
+    restart: unless-stopped
+    # DATABASE_URL, SESSION_SECRET, COOKIE_SECURE (ดู .env.example)
+    env_file: .env
+    environment:
+      TZ: Asia/Bangkok
+    networks:
+      - default       # bridge ปกติ — publish พอร์ต 10005 ให้ผู้ใช้เข้าเว็บ
+      - app_network   # คุยกับ postgres:5432 ใน network ของ nonprod
+
+networks:
+  # network ที่สร้างโดย Compose ที่โฟลเดอร์หลักของโปรเจกต์
+  app_network:
+    external: true
+    name: rimworld-together-on-vps-nonprod_app_network
