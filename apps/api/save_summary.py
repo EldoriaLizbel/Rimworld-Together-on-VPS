@@ -8,6 +8,7 @@ import lz4.block
 import msgpack
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
+from rwt_files import open_game_file
 
 MAX_PACKED = 48 * 1024 * 1024
 MAX_XML = 96 * 1024 * 1024
@@ -96,7 +97,7 @@ def summary(path, modified_ns, size, tiles):
     if not tiles or not 0 < size <= MAX_PACKED:
         return None, None
     try:
-        with path.open("rb") as source:
+        with open_game_file(path) as source:
             packed = source.read(MAX_PACKED + 1)
         if len(packed) != size or path.stat().st_mtime_ns != modified_ns:
             return None, None

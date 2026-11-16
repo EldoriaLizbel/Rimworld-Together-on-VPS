@@ -327,7 +327,9 @@ export function GameConfig({ c }) {
     const expected = staged?.id ? `?staged_id=${encodeURIComponent(staged.id)}` : "";
     try {
       if (action === "restart" || action === "factory-reset") {
-        const result = await request(`${action}${expected}`, { method: "POST" });
+        const result = await request(`${action}${expected}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: action }),
+        });
         setOperation(result.operation.id);
         setNotice(action === "factory-reset" ? "Factory reset requested. Waiting for the game server." : "Restart requested. Waiting for the game server.");
       } else {

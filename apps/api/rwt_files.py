@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,15 +98,31 @@ def now():
     return datetime.now(timezone.utc)
 
 
+def open_game_file(path):
+    if path.resolve() != path.absolute():
+        raise ValueError("Linked game files are not permitted")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise ValueError("Expected a regular game file")
+    return os.fdopen(fd, "rb")
+
+
 def read_json(path):
     try:
-        with path.open(encoding="utf-8-sig") as source:
-            return json.load(source)
+        with open_game_file(path) as source:
+            limit = 16 * 1024 * 1024
+            data = source.read(limit + 1)
+            if len(data) > limit:
+                raise ValueError("Game JSON exceeds the size limit")
+            return json.loads(data.decode("utf-8-sig"))
     except FileNotFoundError:
         return None
 
 
 def write_json(path, payload, mode=None):
+    if path.resolve() != path.absolute():
+        raise ValueError("Linked game files are not permitted")
     if mode is None:
         mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
     with tempfile.NamedTemporaryFile(
@@ -237,7 +254,7 @@ def password_digest(password):
     return hashlib.sha256(password.encode("ascii")).hexdigest().upper() if password else ""
 
 
-def apply_password(game, digest):
+def prepare_password(game, digest):
     if digest != "" and not re.fullmatch(r"[A-F0-9]{64}", digest):
         raise ValueError("Invalid password digest")
     path = game / PASSWORD_FILE
@@ -245,7 +262,25 @@ def apply_password(game, digest):
         raise ValueError("Invalid password config path")
     document, key = setting_target(read_json(path), "Password")
     document[key] = digest
+    return path, document
+
+
+def apply_password(game, digest):
+    path, document = prepare_password(game, digest)
     write_json(path, document, mode=0o600)
+
+
+def write_settings_batch(documents):
+    originals = {path: read_json(path) for path in documents}
+    written = []
+    try:
+        for path, document in documents.items():
+            write_json(path, document, mode=0o600 if path.name == Path(PASSWORD_FILE).name else None)
+            written.append(path)
+    except OSError:
+        for path in reversed(written):
+            write_json(path, originals[path])
+        raise
 
 
 def restore_factory_defaults(game):
@@ -268,13 +303,4 @@ def restore_factory_defaults(game):
     if password is not None:
         password["Password"] = defaults[PASSWORD_FILE]["Password"]
         documents[password_path] = password
-    originals = {path: read_json(path) for path in documents}
-    written = []
-    try:
-        for path, document in documents.items():
-            write_json(path, document, mode=0o600 if path == password_path else None)
-            written.append(path)
-    except OSError:
-        for path in reversed(written):
-            write_json(path, originals[path])
-        raise
+    write_settings_batch(documents)

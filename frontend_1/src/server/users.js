@@ -1,5 +1,5 @@
 /* ══ user_profile validation + DB error mapping (server only) ════════ */
-import { ROLES } from "./auth";
+import { ROLES } from "./auth.js";
 
 const USERNAME_RE = /^[A-Za-z0-9._@-]{1,64}$/;
 
@@ -28,7 +28,7 @@ export function parseUserBody(body, mode) {
   if (out.nickname && out.nickname.length > 100) throw new BadRequest("Nickname is too long (max 100)");
   if (!ROLES.includes(out.role)) throw new BadRequest(`Role must be one of: ${ROLES.join(", ")}`);
   if (mode === "create" && !out.password) throw new BadRequest("Password is required");
-  if (out.password.length > 72) throw new BadRequest("Password is too long (max 72)"); // bcrypt limit
+  if (Buffer.byteLength(out.password, "utf8") > 72) throw new BadRequest("Password is too long (max 72 UTF-8 bytes)");
   return out;
 }
 

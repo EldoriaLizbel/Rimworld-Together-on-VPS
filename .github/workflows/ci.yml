@@ -1,0 +1,79 @@
+name: Quality gate
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend_1
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend_1/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm audit --audit-level=high
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r apps/api/requirements.txt -r tests/requirements.txt
+      - run: ruff check apps/api scripts tests
+      - run: python -m compileall -q apps/api scripts tests
+      - run: pytest
+      - run: pip-audit -r apps/api/requirements.txt
+      - run: bandit -q -ll -r apps/api
+  infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan Git history for secrets (redacted)
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9 \
+            git --redact --no-banner /repo
+      - name: Validate shell scripts
+        run: |
+          for script in deploy.sh scripts/*.sh infra/beekeeper/startapp.sh; do sh -n "$script"; done
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
+            deploy.sh scripts/*.sh infra/beekeeper/startapp.sh
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      - run: python3 tests/compose_check.py
+      - run: python3 -u tests/integration.py
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [frontend, python, infrastructure]
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      packages: write

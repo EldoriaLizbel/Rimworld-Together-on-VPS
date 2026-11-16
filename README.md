@@ -4,11 +4,11 @@
 
 ![หน้า Server overview แสดงสถานะเซิร์ฟเวอร์ ที่อยู่สำหรับเข้าเกม และข้อมูลโลก](docs/screenshots/server-overview.png)
 
-[ติดตั้งบน VPS](#ติดตั้งบน-vps) · [ให้ผู้เล่นเข้าเกม](#ให้ผู้เล่นเข้าเกม) · [เปิดแดชบอร์ดและ-beekeeper-studio](#เปิดแดชบอร์ดและ-beekeeper-studio) · [ดูภาพหน้าเว็บ](#ภาพหน้าเว็บ) · [ดูแลและอัปเดต](#ดูแลและอัปเดต)
+[ติดตั้งบน VPS](#ติดตั้งบน-vps) · [ให้ผู้เล่นเข้าเกม](#ให้ผู้เล่นเข้าเกม) · [เปิดแดชบอร์ดและ Beekeeper](#เปิดแดชบอร์ดและ-beekeeper-studio) · [ดูภาพหน้าเว็บ](#ภาพหน้าเว็บ) · [สำรอง กู้คืน และอัปเดต](docs/operations.md)
 
 ## ติดตั้งบน VPS
 
-ใช้ **Ubuntu Server 22.04 x86‑64** พร้อมบัญชีที่ใช้ `sudo` ได้ และเชื่อมต่ออินเทอร์เน็ตเพื่อดาวน์โหลด image กับ dependencies รุ่นเกมที่รวมอยู่ในสแตกคือ **RimWorld Together 26.8.31.1**
+ใช้ **Ubuntu Server 22.04 x86‑64** พร้อมบัญชีที่ใช้ `sudo` ได้ แนะนำ RAM อย่างน้อย 4 GiB และพื้นที่เผื่อ backup เชื่อมต่ออินเทอร์เน็ตเพื่อดาวน์โหลด image และ dependencies รุ่นเกมที่ตรึงไว้คือ **RimWorld Together 26.8.31.1**
 
 รันคำสั่งต่อไปนี้ **บน VPS** หลังเข้า SSH
 
@@ -20,7 +20,7 @@ cd Rimworld-Together-on-VPS
 sh deploy.sh
 ```
 
-สคริปต์ติดตั้ง Docker Engine และ Compose จากคลังทางการเมื่อยังขาด สร้างไฟล์ตั้งค่าและรหัสผ่านสุ่ม จากนั้น build, migrate ฐานข้อมูล, สร้าง Docker network, เริ่มบริการทั้งห้า และพิมพ์ผลตรวจสุขภาพจนถึง `Ready`
+สคริปต์ติดตั้ง Docker Engine และ Compose จากคลังทางการเมื่อยังขาด สร้างไฟล์ตั้งค่าและรหัสผ่านสุ่ม จากนั้น build, ตรวจ migration, เริ่มบริการ และพิมพ์ผลตรวจจากภายใน Docker หากมี release ที่เผยแพร่แล้ว ใช้ `sh deploy.sh --prepare` เพื่อข้ามการ build แล้ว [ติดตั้งจาก GHCR](docs/operations.md#ติดตั้งหรืออัปเดต)
 
 ในการติดตั้งครั้งแรก สคริปต์ใช้ HTTPS ตรวจ **public IPv4 ขาออก** ผ่าน [ipify](https://www.ipify.org/) แล้วพิมพ์ที่อยู่สำหรับเข้าเกม หาก VPS ใช้ NAT, Floating IP, หรือ IP ที่ซื้อไว้ต่างจาก IP ขาออก ให้ระบุ IP หรือ DNS จากแผงผู้ให้บริการเอง
 
@@ -53,6 +53,8 @@ ssh -N -L 10005:127.0.0.1:10005 -L 5800:127.0.0.1:5800 ubuntu@203.0.113.10
 
 Beekeeper GUI ใช้ SSH tunnel จำกัดการเข้าถึง ส่วน PostgreSQL ตรวจรหัสผ่านแยกจากบัญชีเว็บ
 
+หากต้องการเปิด dashboard ผ่าน public IP:10005 ให้เปิดเองตาม [คู่มือการติดตั้ง](docs/operations.md#ติดตั้งหรืออัปเดต) HTTP ที่เปิดโดยตรงไม่เข้ารหัส แนะนำ SSH tunnel หรือ HTTPS proxy สำหรับการดูแลระบบ
+
 ## ภาพหน้าเว็บ
 
 ### Worker
@@ -71,18 +73,22 @@ Beekeeper GUI ใช้ SSH tunnel จำกัดการเข้าถึง
 
 ```sh
 # ดูสถานะ
-docker compose --env-file .rwt-deploy/compose.env ps
+sh scripts/release-status.sh
+sh scripts/smoke-test.sh
 
 # ติดตาม log เกม
 docker compose --env-file .rwt-deploy/compose.env logs -f rimworld
 
-# อัปเดตจาก GitHub
-git pull --ff-only
-sh deploy.sh
+# สำรองข้อมูล
+sh scripts/backup.sh --scope db
+sh scripts/backup.sh --scope full --maintenance
+
+# ตรวจแผนอัปเดตแดชบอร์ด: ใช้ SHA เต็มจาก GitHub Release
+sh scripts/deploy-release.sh --version <SHA40> --scope web --dry-run
 ```
 
-สคริปต์ใช้ค่าที่บันทึกไว้เมื่อรันซ้ำ และการอัปเดต image อาจทำให้เกมรีสตาร์ต เก็บสำรอง `.rwt-deploy/` ซึ่งมีข้อมูลเกมและข้อมูลตั้งค่า รวมถึง volume PostgreSQL ของโปรเจกต์ คำสั่ง `docker compose down -v` จะลบ volumes ของโปรเจกต์
+การอัปเดตเฉพาะเว็บใช้ `--scope web` และไม่รีสตาร์ตเกม/ฐานข้อมูล/API เมื่อย้ายจากรุ่นเดิม ให้ใช้ `--scope app` ครั้งแรกเพื่ออัปเดตเว็บกับ API ให้ใช้สัญญาการสื่อสารรุ่นเดียวกัน ข้อมูลเกมและข้อมูล PostgreSQL คงอยู่ Full backup และการเปลี่ยน image เกมต้องจัดช่วง maintenance
 
 หากผู้เล่นเข้าไม่ได้ ให้ตรวจ `docker compose ... ps` ว่า RimWorld ขึ้น Healthy แล้วเทียบ IP/พอร์ตกับหน้าผู้ให้บริการ หากแดชบอร์ดเข้าไม่ได้ ให้ตรวจว่า SSH tunnel ยังเปิดอยู่
 
-อ่านรายละเอียดสแตก ตารางฐานข้อมูล และขั้นตอน nonprod เพิ่มเติมใน [RTenv.txt](RTenv.txt)
+อ่าน [คู่มือดูแลระบบและกู้คืน](docs/operations.md), [การตั้งค่า GitHub Actions และ production](docs/github-actions.md), [รายละเอียดสแตกและตัวแปร](RTenv.txt) และ [รายงานการตรวจและทดสอบ](docs/implementation-report.md)

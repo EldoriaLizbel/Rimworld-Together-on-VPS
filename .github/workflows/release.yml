@@ -1,0 +1,80 @@
+name: Build and publish release
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build Linux x86-64 images
+        run: |
+          docker build --platform linux/amd64 --tag rwt-web:ci frontend_1
+          docker build --platform linux/amd64 --target api --tag rwt-api:ci apps/api
+          docker build --platform linux/amd64 --target rimworld --tag rwt-rimworld:ci apps/api
+          docker build --platform linux/amd64 --tag rwt-beekeeper:ci infra/beekeeper
+          postgres="$(sed -n 's/^POSTGRES_VERSION=//p' deploy.sh)"
+          docker pull --platform linux/amd64 "postgres:$postgres"
+          docker tag "postgres:$postgres" rwt-postgres:ci
+      - name: Gate fixed high and critical findings in owned runtime images
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: rwt-web:ci
+          version: v0.71.2
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          scanners: vuln
+      - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          image-ref: rwt-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          scanners: vuln
+          skip-setup-trivy: true
+      - name: Report high and critical upstream image findings
+        shell: bash
+        run: |
+          for svc in postgres rimworld beekeeper; do
+            printf '::group::%s upstream image findings\n' "$svc"
+            trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 "rwt-$svc:ci"
+            printf '::endgroup::\n'
+          done
+      - name: Publish digest-addressed images and manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="release-$GITHUB_SHA"
+          if assets="$(gh release view "$release" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+            grep -Fxq release.json <<<"$assets" || { echo 'Existing release is missing release.json' >&2; exit 1; }
+            echo "This commit already has a published manifest; leaving it immutable."
+            exit 0
+          fi
+          registry="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          for service in api web beekeeper rimworld; do
+            tag="$registry-$service:sha-$GITHUB_SHA"
+            docker tag "rwt-$service:ci" "$tag"
+            docker push "$tag" | tee "$RUNNER_TEMP/$service.push"
+          done
+          python3 scripts/release-manifest.py "$RUNNER_TEMP" "$registry" "$GITHUB_SHA"
+          gh release create "$release" "$RUNNER_TEMP/release.json" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "RimWorld VPS ${GITHUB_SHA:0:12}" \
+            --notes "Quality and image checks passed for $GITHUB_SHA. Deploy manually using the release SHA."

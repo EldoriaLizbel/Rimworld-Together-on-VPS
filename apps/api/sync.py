@@ -9,7 +9,7 @@ from pathlib import Path
 
 from psycopg.types.json import Jsonb
 
-from rwt_files import BOOT, IDENTIFIER, LOGINS, REQUEST, SPOOL, WORLD, now, read_json, read_settings, revision
+from rwt_files import BOOT, IDENTIFIER, LOGINS, REQUEST, SPOOL, WORLD, now, open_game_file, read_json, read_settings, revision
 from save_summary import summary
 from worker import sample_online, sample_resources
 
@@ -78,7 +78,7 @@ def read_streams(epoch, offsets, cutoff):
             continue
         stream_name = f"{epoch}/{path.name}"
         try:
-            with path.open("rb") as source:
+            with open_game_file(path) as source:
                 source.seek(offsets.get(stream_name, 0))
                 while line := source.readline():
                     if not line.endswith(b"\n"):
@@ -93,7 +93,7 @@ def read_streams(epoch, offsets, cutoff):
                         LOG.warning("Skipping an invalid game log record in %s", stream_name)
                     if len(entries) >= 2000:
                         return entries
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
             continue  # The supervisor may have expired the stream.
     return entries
 

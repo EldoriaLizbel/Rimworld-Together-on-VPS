@@ -7,3 +7,6 @@
 /postgresql_1/postgres-docker/.env
 /data/
 __pycache__/
+/.pytest_cache/
+/.ruff_cache/
+/rwt-backups/

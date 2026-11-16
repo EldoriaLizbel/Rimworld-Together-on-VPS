@@ -3,15 +3,12 @@ import os
 import platform
 import re
 from datetime import datetime, timedelta
+from http.client import HTTPConnection, HTTPException
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import urlopen
 
 from psycopg import Error
 from psycopg.types.json import Jsonb
 from psycopg_pool import PoolTimeout
-
-from rwt_files import now
 
 SESSION_EVENT = re.compile(r"^\[(Log in|Log out)\] > (.+?) \| [^\r\n]+$")
 PLAYER_EVENT = re.compile(r"^\[(Register|Reset player|Save game|Save Map|Set world|Add settlement)\] > (.+)$")
@@ -91,12 +88,16 @@ async def sample_online(cur, boot, status, observed_at):
         """, (observed_at.replace(second=0, microsecond=0), boot["id"], online, Jsonb(counts), log_id))
 
 
-def http_ready(url):
+def http_ready(host, port, path):
+    connection = HTTPConnection(host, port, timeout=2)
     try:
-        with urlopen(url, timeout=2) as response:
+        connection.request("GET", path)
+        with connection.getresponse() as response:
             return response.status == 200
-    except (URLError, TimeoutError, OSError):
+    except (HTTPException, OSError):
         return False
+    finally:
+        connection.close()
 
 
 async def service_checks(pool, game_status):
@@ -109,9 +110,10 @@ async def service_checks(pool, game_status):
             return False
 
     web, postgres, beekeeper = await asyncio.gather(
-        asyncio.to_thread(http_ready, "http://web:3000/api/health"),
+        asyncio.to_thread(http_ready, "web", 3000, "/api/health"),
         postgres_ready(),
-        asyncio.to_thread(http_ready, "http://beekeeper:5800/"),
+        asyncio.to_thread(http_ready, "beekeeper", 5800, "/") if os.getenv("BEEKEEPER_ENABLED", "1") == "1"
+        else asyncio.sleep(0, result="disabled"),
     )
     game = "healthy" if game_status == "ready" else game_status
     return [

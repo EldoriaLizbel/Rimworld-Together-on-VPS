@@ -2,6 +2,7 @@ import asyncio
 import os
 import secrets
 import uuid
+import logging
 from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from typing import Annotated, Literal
@@ -9,8 +10,10 @@ from urllib.parse import unquote
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+from psycopg import OperationalError
 from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
+from fastapi.responses import JSONResponse
 
 from rwt_files import (
     GAME_USERNAME, REQUEST, STAGED, available_fields, now, password_digest, prepare_updates,
@@ -22,7 +25,8 @@ from worker import host_resources, interpret_log, service_checks
 
 @asynccontextmanager
 async def lifespan(app):
-    pool = AsyncConnectionPool(open=False, min_size=1, max_size=5, timeout=5, kwargs={"row_factory": dict_row})
+    pool = AsyncConnectionPool(open=False, min_size=1, max_size=5, timeout=5,
+                               kwargs={"row_factory": dict_row, "options": "-c statement_timeout=8000"})
     async with pool:
         await pool.wait(timeout=30)
         app.state.pool = pool
@@ -36,8 +40,15 @@ async def lifespan(app):
                 await task
 
 
-app = FastAPI(title="RimWorld Together app server", lifespan=lifespan)
+app = FastAPI(title="RimWorld Together app server", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 TOKEN = os.environ["RIMWORLD_API_TOKEN"]
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(PoolTimeout)
+@app.exception_handler(OSError)
+async def service_unavailable(_request, error):
+    logging.getLogger(__name__).warning("Dependency unavailable: %s", type(error).__name__)
+    return JSONResponse({"detail": "A required service or game data is unavailable"}, status_code=503)
 
 
 async def user(
@@ -79,7 +90,7 @@ async def health(request: Request):
     async with request.app.state.pool.connection() as conn:
         await conn.execute("SELECT revision FROM world_config LIMIT 1")
         await conn.execute("SELECT sampled_at FROM worker_sample LIMIT 1")
-    return {"status": "ok"}
+    return {"status": "ok", "contract": 2}
 
 
 @app.get("/overview", dependencies=[Depends(user)])
@@ -272,8 +283,13 @@ async def change_password(request: Request):
         return {"staged": await asyncio.to_thread(persist_stage, staged)}
 
 
+class RestartConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal["restart"]
+
+
 @app.post("/restart", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(administrator)])
-async def restart(request: Request, staged_id: str | None = None):
+async def restart(request: Request, confirmation: RestartConfirmation, staged_id: str | None = None):
     async with request.app.state.operation_lock:
         boot = require_idle(ready=True)
         staged = checked_stage(staged_id)
@@ -292,10 +308,16 @@ async def restart(request: Request, staged_id: str | None = None):
 class PlayerReset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=1, max_length=64)
+    confirm: Literal["player-reset"]
+
+
+class FactoryConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal["factory-reset"]
 
 
 @app.post("/factory-reset", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(administrator)])
-async def factory_reset(request: Request, staged_id: str | None = None):
+async def factory_reset(request: Request, confirmation: FactoryConfirmation, staged_id: str | None = None):
     async with request.app.state.operation_lock:
         boot = require_idle(ready=True)
         checked_stage(staged_id)

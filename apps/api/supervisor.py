@@ -13,7 +13,8 @@ from pathlib import Path
 
 from rwt_files import (
     ANSI, BOOT, GAME_USERNAME, IDENTIFIER, LOGINS, LOGIN_LINE, LOG_PREFIX, REQUEST, SPOOL, STAGED, WORLD,
-    apply_password, now, prepare_updates, read_json, read_settings, restore_factory_defaults, revision, write_json,
+    apply_password, now, prepare_password, prepare_updates, read_json, read_settings, restore_factory_defaults,
+    revision, write_json, write_settings_batch,
 )
 
 GAME = Path("/Data")
@@ -98,10 +99,11 @@ def initialize():
             if request["base_boot"] != previous.get("id"):
                 raise ValueError("The server boot changed before the request could be handled")
             if request["kind"] == "configuration":
-                for path, document in prepare_updates(GAME, request["changes"]).items():
-                    write_json(path, document)
+                documents = prepare_updates(GAME, request["changes"])
                 if "digest" in request:
-                    apply_password(GAME, request["digest"])
+                    path, document = prepare_password(GAME, request["digest"])
+                    documents[path] = document
+                write_settings_batch(documents)
                 if request.get("staged_id") and (read_json(STAGED) or {}).get("id") == request["staged_id"]:
                     STAGED.unlink(missing_ok=True)
                 changed = True

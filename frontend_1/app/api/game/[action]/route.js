@@ -1,5 +1,5 @@
 import { getSessionUser } from "../../../../src/server/auth";
-import { fail, handle, json } from "../../../../src/server/http";
+import { fail, handle, json, readBody } from "../../../../src/server/http";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ const routes = {
 };
 
 const forward = handle(async (request, { params }) => {
-  const { action } = params;
+  const { action } = await params;
   if (!routes[request.method]?.has(action)) return fail(404, "Unknown game operation");
   const user = await getSessionUser(request);
   if (!user) return fail(401, "Not signed in");
@@ -21,15 +21,10 @@ const forward = handle(async (request, { params }) => {
     "X-Rimworld-User": encodeURIComponent(user.username),
   };
   let body;
-  if (request.method !== "GET" && request.headers.get("sec-fetch-site") === "cross-site") {
-    return fail(403, "Cross-site request rejected");
-  }
-  if (request.method === "PATCH" || action === "player-reset") {
-    if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
-      return fail(415, "Expected JSON settings");
-    }
-    body = await request.text();
-    if (body.length > 180000) return fail(413, "Request is too large");
+  if (request.method === "PATCH" || request.method === "POST") {
+    const [data, error] = await readBody(request, 180000);
+    if (error) return error;
+    body = data.text;
     headers["Content-Type"] = "application/json";
   }
   const target = new URL(`/${action}`, process.env.RIMWORLD_API_URL);
@@ -47,7 +42,7 @@ const forward = handle(async (request, { params }) => {
   }
   try {
     const response = await fetch(target, {
-      method: request.method, headers, body, cache: "no-store", signal: AbortSignal.timeout(8000),
+      method: request.method, headers, body, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(8000),
     });
     const data = await response.json();
     if (!response.ok) {

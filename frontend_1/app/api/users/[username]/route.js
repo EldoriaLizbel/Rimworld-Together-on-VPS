@@ -1,9 +1,9 @@
 import { getPool } from "../../../../src/server/db";
 import {
   hashPassword, PUBLIC_COLS, SUPERUSER,
-  createSessionToken, cookieOptions, SESSION_COOKIE,
+  startSession, cookieOptions, SESSION_COOKIE,
 } from "../../../../src/server/auth";
-import { json, fail, handle, requireSuperuser } from "../../../../src/server/http";
+import { json, fail, handle, readBody, requireSuperuser } from "../../../../src/server/http";
 import { parseUserBody, mapDbError, decodeParam, BadRequest } from "../../../../src/server/users";
 
 export const dynamic = "force-dynamic";
@@ -34,9 +34,11 @@ async function inTx(fn) {
 export const PUT = handle(async (request, { params }) => {
   const [me, deny] = await requireSuperuser(request);
   if (deny) return deny;
-  const target = decodeParam(params.username);
+  const target = decodeParam((await params).username);
   try {
-    const u = parseUserBody(await request.json().catch(() => ({})), "update");
+    const [data, error] = await readBody(request);
+    if (error) return error;
+    const u = parseUserBody(data.value, "update");
     const newHash = u.password ? await hashPassword(u.password) : null;
 
     const user = await inTx(async (client) => {
@@ -46,6 +48,9 @@ export const PUT = handle(async (request, { params }) => {
         throw new BadRequest("You can't change your own role", 409);
       if (cur.rows[0].role === SUPERUSER && u.role !== SUPERUSER && (await otherSuperusers(client, target)) === 0)
         throw new BadRequest("Can't demote the last super-user", 409);
+      if (newHash || u.username !== target) {
+        await client.query("DELETE FROM dashboard_sessions WHERE username = $1", [target]);
+      }
 
       const { rows } = await client.query(
         `UPDATE user_profile SET
@@ -61,8 +66,8 @@ export const PUT = handle(async (request, { params }) => {
 
     const res = json({ user });
     /* renamed yourself → re-issue the session cookie for the new username */
-    if (target === me.username && user.username !== me.username)
-      res.cookies.set(SESSION_COOKIE, createSessionToken(user.username), cookieOptions());
+    if (target === me.username && (newHash || user.username !== me.username))
+      res.cookies.set(SESSION_COOKIE, await startSession(user.username), cookieOptions());
     return res;
   } catch (err) {
     const e = mapDbError(err);
@@ -74,7 +79,7 @@ export const PUT = handle(async (request, { params }) => {
 export const DELETE = handle(async (request, { params }) => {
   const [me, deny] = await requireSuperuser(request);
   if (deny) return deny;
-  const target = decodeParam(params.username);
+  const target = decodeParam((await params).username);
   if (target === me.username) return fail(409, "You can't delete the account you're signed in with");
   try {
     await inTx(async (client) => {

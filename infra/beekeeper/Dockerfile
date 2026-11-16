@@ -1,4 +1,4 @@
-FROM jlesage/baseimage-gui:debian-12-v4.14.0
+FROM jlesage/baseimage-gui:debian-12-v4.14.0@sha256:98ba7aced6e453ad6a43f2c0f64273f601ee3aabc4fc17c5acac316878c5e7bc
 
 ARG TARGETARCH
 ENV APP_NAME="Beekeeper Studio" \

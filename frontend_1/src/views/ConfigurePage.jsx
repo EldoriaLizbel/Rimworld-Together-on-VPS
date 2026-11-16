@@ -282,7 +282,7 @@ function GamePlayers({ c }) {
     setNotice("");
     try {
       const { operation } = await gameRequest("player-reset", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, confirm: "player-reset" }),
       });
       setPending({ id: operation.id, username });
       setNotice(`Waiting for the game to confirm the reset for ${username}.`);

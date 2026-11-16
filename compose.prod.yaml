@@ -1,0 +1,16 @@
+# When used directly supply four immutable RWT_*_IMAGE references.
+# scripts/ops.py generates a per-service overlay for mixed/scoped deployments.
+services:
+  web:
+    build: !reset null
+    image: ${RWT_WEB_IMAGE:?RWT_WEB_IMAGE is required}
+  api:
+    build: !reset null
+    image: ${RWT_API_IMAGE:?RWT_API_IMAGE is required}
+  rimworld:
+    build: !reset null
+    image: ${RWT_RIMWORLD_IMAGE:?RWT_RIMWORLD_IMAGE is required}
+  beekeeper:
+    build: !reset null
+    image: ${RWT_BEEKEEPER_IMAGE:?RWT_BEEKEEPER_IMAGE is required}
+    profiles: [tools]

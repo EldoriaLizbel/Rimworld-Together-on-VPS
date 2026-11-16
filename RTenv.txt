@@ -1,736 +1,111 @@
-# VPS RimWorld Together Environment Specification
-
-## 1. Project Overview
-
-**Project Name:** `vps-rimworld-together-env`
-
-**Local Nonprod Compose Project:** `rimworld-together-on-vps-nonprod`
-
-**Project Type:** Self-hosted RimWorld Together Game Server Management Platform
-
-**Target Deployment:** Linux VPS running Docker Engine and Docker Compose
-
-**Development Environment:** Local computer using Docker Compose before deployment to VPS
-
-### Project Goal
-
-Build a self-hosted management platform for a RimWorld Together multiplayer game server.
-
-The platform must allow users to view game server information through a Next.js frontend and allow administrators to manage the RimWorld Together server through a web-based control panel.
-
-The entire application environment should be deployed as a single Docker Compose project.
-
-The RimWorld Together game server must operate independently from the management platform so that restarting the game does not restart the Next.js application, Python services, PostgreSQL database, or VPS itself.
-
-**Important constraints:**
-
-- Use Docker Compose for container orchestration.
-- Use only the six requested services unless an additional service is technically necessary.
-- Keep the environment simple, maintainable, and easy to deploy.
-- Do not introduce unnecessary dependencies or infrastructure.
-- Use persistent storage for game data and databases.
-- Develop and test locally before VPS deployment.
-- Prefer a single VPS deployment rather than distributed infrastructure.
-
----
-
-## 2. Required Docker Containers
-
-The Docker Compose environment should contain exactly six primary services.
-
-| Service Name | Technology | Responsibility |
-|---|---|---|
-| `rimworld` | RimWorld Together Dedicated Server | Multiplayer game server |
-| `web` | Next.js | Frontend, dashboard, authentication UI |
-| `postgres` | PostgreSQL | Persistent application data |
-| `api` | Python FastAPI | Backend APIs, business logic, inter-service communication |
-| `worker` | Python | Game recovery, backup, health monitoring |
-| `nginx` | Nginx | Reverse proxy for frontend/backend |
-
-These services are the target for the VPS Docker Compose project, named `vps-rimworld-together-env`. Local nonprod uses the `rimworld-together-on-vps-nonprod` Compose project with `rimworld`, `web`, `api`, `postgres`, and `beekeeper`. The `api` service runs FastAPI and synchronizes game data every three seconds. The `beekeeper` service provides the local database GUI.
-
-### 2.1 RimWorld Together Container (`rimworld`)
-
-**Purpose:** Host the actual RimWorld Together multiplayer game server.
-
-Requirements:
-
-- Use the official RimWorld Together dedicated server container image, after verifying its current image name and supported version.
-- Expose the game's required TCP port externally.
-- Default intended game port: `25555`, subject to verification against the installed server version.
-- Store game data, world files, configuration, and saves persistently.
-- Support starting, stopping, and restarting only this game container.
-- The game container must not require Next.js or PostgreSQL to be operational.
-- Do not automatically delete or reset saved worlds when the container restarts.
-
-Game management requirements:
-
-- Restart game server.
-- Stop game server.
-- Start game server.
-- Read game logs.
-- Read and modify supported game configuration.
-- Configure game rules such as enabling/disabling supported raid activities.
-- Backup game data.
-- Restore saved world data.
-- Reset an existing world or initialize a new world, where supported.
-
-**Critical:** Restarting the game means restarting only the `rimworld` container, not restarting Docker Compose as a whole and not rebooting the VPS.
-
-World generation, map seed, difficulty, storyteller, world configuration, and initial mod selection must be investigated against the actual RimWorld Together implementation.
-
-Do not assume the dedicated server can generate a world programmatically. If world creation requires the first player to connect through the RimWorld client, the platform should support that workflow instead.
-
-### 2.2 Next.js Container (`web`)
-
-**Purpose:** Provide the entire web-based interface for the game server.
-
-The application should support two primary roles:
-
-**User**
-
-- View the server homepage.
-- View game server status.
-- View server information.
-- View the total registered player list, if supported by available game data.
-- View currently connected players, if technically available.
-- View game chat or chat history, if technically available.
-- View public server logs/events, where permitted.
-
-**Admin**
-
-All user functionality, plus:
-
-- Access the administration dashboard.
-- Change supported game server configurations.
-- Enable or disable supported raid-related settings.
-- Restart, stop, and start the game container.
-- Manage world initialization and supported world settings.
-- Create or reset worlds where supported.
-- Backup and restore saved worlds.
-- View server logs.
-- View health status of the other containers.
-- Review administration history.
-
-The Next.js service should communicate with the Python backend for application data and privileged operations.
-
-The frontend must not have unrestricted access to Docker Engine or direct access to sensitive game files.
-
-Authentication and authorization must be enforced by the backend, not only through frontend UI restrictions.
-
-### 2.3 PostgreSQL Container (`postgres`)
-
-**Purpose:** Store persistent management platform data.
-
-Required data categories:
-
-**Authentication and Accounts**
-
-- User accounts
-- User roles
-- Authentication-related data
-
-**Game Information**
-
-- Structured game logs/events
-- Player information obtained from supported game sources
-- Player connection history, if available
-- Chat history, if available
-
-**Administration**
-
-- Server configuration change history
-- Administrative activity history
-- Game lifecycle operation history
-- Backup and recovery operation history
-
-PostgreSQL is for application data and history.
-
-The original RimWorld Together world files, saves, and native game configuration must remain in persistent game storage rather than being moved into PostgreSQL.
-
-PostgreSQL must not expose its database port publicly.
-
-In local nonprod, the web frontend and Beekeeper Studio connect to `postgres:5432` over the Compose network. PostgreSQL stays on the Docker network with no published host port in either environment.
-
-Avoid storing unlimited raw game logs in PostgreSQL. Use bounded log retention and store structured events when practical.
-
-### 2.4 Python API Container (`api`)
-
-**Technology:** Python with FastAPI.
-
-**Purpose:** Act as the main application backend and communication layer between services.
-
-Responsibilities:
-
-- Provide APIs to Next.js.
-- Validate authenticated user requests.
-- Enforce admin permissions.
-- Read game server status.
-- Retrieve supported game information.
-- Read and validate server configuration.
-- Process supported configuration changes.
-- Read and process RimWorld Together logs/events.
-- Persist structured information in PostgreSQL.
-- Create game management operation requests.
-- Coordinate with the Python Worker for recovery and health operations.
-- Return operation progress and results to Next.js.
-
-Example conceptual endpoints:
-
-```text
-GET    /api/health
-GET    /api/game/status
-GET    /api/game/logs
-GET    /api/game/config
-PATCH  /api/game/config
-DELETE /api/game/config
-PATCH  /api/game/password
-POST   /api/game/player-reset
-
-POST   /api/game/start
-POST   /api/game/stop
-POST   /api/game/restart
-POST   /api/game/factory-reset
-
-GET    /api/game/players
-GET    /api/game/chat
-
-POST   /api/game/backup
-POST   /api/game/restore
-
-GET    /api/system/health
-GET    /api/admin/history
-```
-
-These are proposed platform endpoints, not confirmed endpoints provided by RimWorld Together.
-
-Endpoints depending on game internals must be implemented only after identifying reliable data sources or supported integration mechanisms.
-
-### 2.5 Python Worker Container (`worker`)
-
-**Technology:** Python.
-
-**Purpose:** Handle background server maintenance and recovery tasks.
-
-Responsibilities:
-
-- Monitor RimWorld Together server health.
-- Monitor relevant container health.
-- Perform game data backups.
-- Perform world/save recovery.
-- Verify backup integrity.
-- Handle recovery failures.
-- Perform longer-running management operations requested through the backend.
-
-The worker should coordinate with the API and PostgreSQL.
-
-A simple PostgreSQL-backed job mechanism is acceptable if appropriate. Do not introduce Redis, Celery, RabbitMQ, or another queue system unless a real technical requirement justifies it.
-
-For operations modifying world files:
-
-1. Ensure conflicting operations cannot run concurrently.
-2. Stop the game safely when required.
-3. Back up the current state.
-4. Apply the requested restore or modification.
-5. Restart the game if appropriate.
-6. Verify the resulting state.
-7. Record the operation result.
-
-**Security requirement:** The worker and API must not receive unrestricted Docker daemon access without a security review.
-
-Investigate the simplest secure mechanism to control only the intended game container. Do not add a seventh container automatically. If host-level integration is required, document it clearly before implementation.
-
-### 2.6 Nginx Container (`nginx`)
-
-**Purpose:** Route HTTP/HTTPS requests from users to the frontend and backend.
-
-Responsibilities:
-
-- Expose web ports `80` and `443` on the VPS.
-- Reverse proxy frontend traffic to Next.js.
-- Reverse proxy backend API traffic to FastAPI.
-- Support HTTPS in production.
-- Keep internal application service ports private.
-
-Conceptual routing:
-
-```text
-https://example.com
-        |
-        v
-      Nginx
-        |
-        +-- /        --> Next.js :3000
-        |
-        +-- /api/*   --> FastAPI :8000
-```
-
-The final routing configuration must account for Next.js routes, API paths, authentication, and any required WebSocket connections.
-
-The RimWorld Together game port is separate from the web reverse proxy and should be exposed directly as required by the game protocol.
-
----
-
-## 3. Container Communication Architecture
-
-```text
-                Internet / Local Network
-                         |
-           +-------------+-------------+
-           |                           |
-      Web Browser                 RimWorld Client
-           |                           |
-       HTTP/HTTPS                   TCP :25555
-           |                           |
-           v                           v
-        [nginx]                   [rimworld]
-           |
-      +----+----+
-      |         |
-      v         v
-    [web]     [api]
-                |
-          +-----+------+
-          |            |
-          v            v
-       [postgres]    [worker]
-                         |
-                         v
-                 Game maintenance
-                 Backup / Recovery
-```
-
-This diagram describes logical responsibilities. Actual container communication, persistent volumes, and privileged control paths must be designed and documented.
-
-Network requirements:
-
-- Only Nginx web ports and the required game port should be publicly exposed.
-- Next.js, FastAPI, PostgreSQL, and Python Worker should communicate through internal Docker networking.
-- PostgreSQL must remain private.
-- Avoid unnecessary published ports.
-- Separate sensitive database access where practical.
-
----
-
-## 4. Persistent Storage
-
-Persistent storage is required because containers may be recreated, upgraded, or restarted.
-
-Suggested storage responsibilities:
-
-```text
-data/
-├── rimworld/
-│   ├── game-config/
-│   ├── game-saves/
-│   └── other-game-data/
-│
-└── backups/
-    └── rimworld/
-```
-
-This directory structure is conceptual.
-
-The actual RimWorld Together data structure must be determined from the selected official server image and its runtime configuration. Do not assume these subdirectories exist inside the game.
-
-Use the actual supported game data mount, such as `/Data` if verified for the selected image.
-
-PostgreSQL should use a persistent Docker volume.
-
-Backup requirements:
-
-- Preserve game worlds and saves.
-- Preserve relevant game configuration.
-- Support manual backups.
-- Support recovery of previous world states.
-- Avoid overwriting active saves.
-- Store backups outside the active game-data directory.
-- Provide a strategy for external/off-VPS backups in production.
-
-A reset or world recreation operation must require administrator confirmation and must not accidentally delete unrelated data.
-
----
-
-## 5. Game Management Operations
-
-The web dashboard must support the following intended operations.
-
-| Operation | Description |
-|---|---|
-| Start Game | Start only the RimWorld Together container |
-| Stop Game | Stop only the RimWorld Together container |
-| Restart Game | Restart only the RimWorld Together container |
-| View Status | Show the actual status of the game |
-| View Logs | Display available game logs |
-| Edit Config | Update supported game server settings |
-| Enable/Disable Raids | Change the supported raid-related setting |
-| Create World | Initialize a new world where technically supported |
-| Reset World | Reset existing world data with confirmation |
-| Backup World | Create a consistent game data backup |
-| Restore World | Recover game data from a selected backup |
-| Health Check | Monitor relevant containers and game availability |
-
-Game operations should:
-
-- Require appropriate permissions.
-- Record the requesting administrator.
-- Record timestamps and operation results.
-- Prevent conflicting destructive operations.
-- Report failures rather than assuming success.
-- Distinguish container health from actual game readiness.
-
-The game should remain operational even if the management dashboard is temporarily unavailable.
-
----
-
-## 6. RimWorld Together Integration Constraints
-
-RimWorld Together is an existing third-party multiplayer server implementation.
-
-Before implementing its management features, inspect the official source code and documentation to determine:
-
-1. The actual server Docker image and its supported versions.
-2. Required game port and protocol.
-3. Persistent data directory.
-4. Native server configuration files.
-5. World creation behavior.
-6. World seed and difficulty configuration behavior.
-7. Supported mod list management.
-8. Available game logs and event formats.
-9. How connected-player information can be obtained.
-10. Whether chat messages can be observed.
-11. Whether game console commands or other control interfaces are available.
-12. Whether configuration changes require a game restart.
-
-**Do not invent game APIs, configuration keys, console commands, or file structures.**
-
-For unsupported capabilities:
-
-- Explain the limitation.
-- Identify whether the feature requires changes to the RimWorld Together server.
-- Keep the platform architecture extensible.
-- Do not create fake player counts, chat data, or world state.
-
-Specifically, investigate how the first player initializes the world and selects the initial mod configuration.
-
-The management panel may provide a configuration preparation interface even if the final world creation step must be completed inside RimWorld itself.
-
----
-
-## 7. Local Development Requirements
-
-The full environment should be developed locally before being deployed to a VPS.
-
-Run Compose commands from the repository root. The root `compose.yaml` includes PostgreSQL and extends the frontend service. PostgreSQL and the frontend each load their own `.env` files. Match the frontend `DATABASE_URL` password with `RIMWORLD_WEB_DB_PASSWORD` in the PostgreSQL settings. Copy the root `.env.example` to `.env` and set independent random values for `RIMWORLD_API_DB_PASSWORD` and `RIMWORLD_API_TOKEN`. Set `RIMWORLD_API_DB_NAME` to the PostgreSQL `POSTGRES_DB` value.
-
-```sh
-docker compose build web api rimworld beekeeper
-docker compose up -d --wait
-```
-
-Fresh PostgreSQL volumes apply `004_game_dashboard.sql`, `005_player_online.sql` and `006_worker_metrics.sql` automatically. For an existing volume, apply the migrations before starting the upgraded app stack. This keeps the database and existing user accounts.
-
-```powershell
-docker compose up -d --wait postgres
-Get-Content -Raw postgresql_1/postgres-docker/sql/004_game_dashboard.sql | docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-Get-Content -Raw postgresql_1/postgres-docker/sql/005_player_online.sql | docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-Get-Content -Raw postgresql_1/postgres-docker/sql/006_worker_metrics.sql | docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-```
-
-Open the web frontend at `http://127.0.0.1:10005`. A new PostgreSQL volume initializes the `rimworldtogether` dashboard superuser. Its password comes from `RIMWORLD_ADMIN_PASSWORD` in `postgresql_1/postgres-docker/.env`. Ordinary starts keep existing accounts.
-
-Local nonprod stores game data in `data/nonprod/rimworld` and database data in the project-scoped `postgres_data` Docker volume. Port `25555/tcp` is published on `127.0.0.1` by default. Set `RIMWORLD_HOST_BIND` and `RIMWORLD_HOST_PORT` in the root `.env` to change the Compose mapping. Ordinary teardown uses `docker compose down` to keep named volumes. Adding `-v` deletes the database, Beekeeper settings, and the game management bridge. The game bind mount remains on disk.
-
-### Implemented game dashboard
-
-FastAPI has its own Python runtime and joins the application network with PostgreSQL and the web. Next.js forwards authenticated requests over the internal network. FastAPI verifies the service token and reads the caller's current role using the limited `rimworld_api` database account. Dashboard configuration, restart, player activity, and logs require a web superuser. FastAPI reads the game data bind mount in read-only mode. The game image derives from the upstream `26.8.31.1` image with its original game binary.
-
-| PostgreSQL table | Data |
-|---|---|
-| `world_config` | Active JSON snapshot of public server settings, action settings, mod rules, storyteller, difficulty, scenarios, events and world settings when created. Game passwords and IP ban records stay in their original files. |
-| `server_log` | Time, category, and message copied from the game process output that also goes to Docker. Startup is captured before the first player. Log history keeps a rolling seven days and is cleared when a changed configuration takes effect on a new boot. A plain restart keeps the existing history. Docker's separate console history is limited by its log rotation. |
-| `player_data` | Registered game usernames, settlement tile IDs, last observed login and timestamp of the latest saved file. For supported saves, the API also reads the primary settlement name and counts colonists on the saved settlement maps. Unsupported formats and missing maps leave these fields unknown. Counts update when a save arrives. |
-| `player_online_sample` | Observed online usernames and player count per minute, derived by the Python sync loop from the game's login/logout events. Seven-day retention is independent of resets in the server log. History starts when the sampler is deployed. |
-
-The read-only Overview shows the published endpoint, the game's bind address, version, player count, boot time and world initialization status. Superusers also see the configuration snapshot and player activity in the same view. Ready requires the game's listener startup log, a listening TCP socket inside the container, a recent supervisor heartbeat, and a matching configuration snapshot in PostgreSQL. The first player to complete world creation in the RimWorld client supplies the shared map seed. RimWorld Together saves it as `SeedString` in `Assets/WorldValuesFile.json` and reuses it on subsequent joins and restarts. Keep the persistent game data directory when recreating the container. Config server displays the saved seed for reference. Its editing API cannot modify the world file.
-
-The superuser Worker page contains Container health, a selectable history chart and Server log. The health table uses HTTP, a PostgreSQL query and the game listener/heartbeat as functional probes. The log shows Python interpretations alongside the original Docker output. Worker refreshes these views about every minute. All charts use time on X and the selected measurement on Y. Chart choices are online players, used and available RAM for the Docker Linux environment, and elapsed uptime of the RimWorld game process. The API stores new RAM and uptime samples once per minute in `worker_sample` and keeps seven days. All charts offer 24-hour, 3-day and 7-day filters.
-
-Config server shows editable settings together by category. Save changes stages edits in the management bridge without restarting. The red Restart game server button requires confirmation, then the supervisor applies saved settings on startup. A plain restart preserves the current log history. Discard saved changes removes the staged batch. Only the RimWorld process/container restarts. Natively managed values remain visible on the superuser Overview.
-
-The red Factory reset action restores dashboard-editable fields and the game password to the defaults generated by the pinned official RimWorld Together binary in a blank directory during the image build. It discards staged edits and begins a new server log history. Official defaults enable public listing and telemetry and leave the game password empty. World data, saves, accounts, mod membership and load order, custom event definitions, and deployment settings are preserved.
-
-Player accounts has separate panes for dashboard sign-in accounts and in-game players. Confirming Reset data sends the official `resetplayer` command. RimWorld backs up that player and removes the active save, settlements and sites. The game login, dashboard sign-in and shared world are preserved. The account API manages its own timestamps and blocks a superuser from changing their own role.
-
-Config server supports these settings for RimWorld Together 26.8.31.1.
-
-| Group | Editable settings |
-|---|---|
-| Server | Name, description, player limit, Discord and Workshop links, console log level, console chat, UPnP, server browser listing and telemetry |
-| Chat and backups | Welcome message, login and disconnect notifications, schedule, automatic backup deletion and retention count |
-| Actions | Switch and cooldown for Raid, Trade, Caravan, Aid, Event, Market, Guild, Site, Road, River and Pollution. Custom scenarios use a single switch. Market pricing and listing limits, Site reward interval, construction cost and reward quantity, and Road permissions, costs and travel multipliers |
-| Gameplay | Custom difficulty fields and enforcement. Storyteller and starting scenario enforcement requires a selection supplied through the in-game Admin Panel |
-| Mods | Mod bypass and settings enforcement. Manage mod membership and load order in the in-game Admin Panel |
-| Events | Name, silver cost and enabled state of existing event files under `Assets/Events`. The event definition ID stays tied to the game or mod that supplied it |
-| Game access password | Set or clear a separate password for the game client. The API hashes the new password in the native format. The password and digest are absent from the configuration snapshot and database |
-
-The bind IP/port and client save mode are read-only on the dashboard. To change the published address, edit `RIMWORLD_HOST_BIND` or `RIMWORLD_HOST_PORT` and recreate the relevant Compose services. ServerImageURL, the legacy ActionConfigs/Whitelist/ServerBrowser files, the legacy per-site item and reward definitions, enforced game speed, spy cost, and an independent automatic mod download switch are not present in this build. Event entries appear in Worker after the game creates their files.
-
-Fresh local game data starts with public listing and telemetry disabled. The supervisor revalidates changes and writes only the selected fields before relaunching the binary. The bridge is a named volume for requests, boot status and the output stream. Connected players should save before a restart. Automatic deletion can remove older backups on the next backup cycle.
-
-Config server shows the units beside numeric fields. Road and Site construction, Site rewards, Market prices and event prices use Silver. Action cooldowns and the Site reward interval use real-time milliseconds. The backup schedule uses hours. Dependent controls appear when their controlling switch makes them relevant, and existing draft edits remain visible until saved or discarded. Storyteller and starting scenario enforcement appear after a selection is available from the in-game Admin Panel.
-
-#### Deploy to a VPS
-
-Clone the repository containing this Compose stack onto a Linux x86-64 VPS, the platform supported by the pinned official game image. On a fresh Ubuntu or Debian VPS, sign in as root or with an account that can use `sudo`. The script installs Docker Engine and Compose from Docker's package repository if they are missing. On other Linux distributions, provide a working Docker Engine and Compose plugin.
-
-```sh
-git clone <URL-of-rimworld-together-on-vps-repository> rimworld-together-on-vps
-cd rimworld-together-on-vps
-RIMWORLD_PUBLIC_HOST=203.0.113.10 sh deploy.sh
-```
-
-Replace the example with the VPS public IPv4 address or DNS name. The script generates separate deployment and service environment files with random credentials, builds the images, runs the repeatable database migrations, waits for each service, and verifies the internal connections. It uses the `rimworld-together-vps` Compose project and creates its own network. Run the same script again for updates. It keeps the existing deployment files, PostgreSQL data, and game data. The official game binary is built into the pinned container image, so the upstream source checkout is unnecessary on the VPS.
-
-Allow inbound TCP `25555` in the VPS provider's firewall or security group. RimWorld Together clients connect directly to the public address and port. The dashboard and Beekeeper listen only on the VPS loopback interface. Forward their ports over SSH from your computer.
-
-```sh
-ssh -N -L 10005:127.0.0.1:10005 -L 5800:127.0.0.1:5800 user@203.0.113.10
-```
-
-Open `http://127.0.0.1:10005` for the dashboard, or `http://127.0.0.1:5800` for Beekeeper. The initial dashboard account is `rimworldtogether`. Retrieve its generated password on the VPS from `.rwt-deploy/postgres.env` (the `RIMWORLD_ADMIN_PASSWORD` entry). Keep the `.rwt-deploy` directory private and back it up along with the project's PostgreSQL volume. Use the deployment env file when managing this stack directly.
-
-```sh
-docker compose --env-file .rwt-deploy/compose.env ps
-docker compose --env-file .rwt-deploy/compose.env logs -f rimworld
-```
-
-#### Beekeeper Studio
-
-Open `http://127.0.0.1:5800` to use Beekeeper Studio running inside the `beekeeper` service. The Docker host publishes this address on loopback only. Browser authentication for the graphical app is disabled by default. PostgreSQL authenticates separately, and a saved connection in the `beekeeper_config` volume can reuse its credentials. Choose PostgreSQL over TCP and use these settings.
-
-| Setting | Value |
-|---|---|
-| Host | `postgres` |
-| Port | `5432` |
-| Database | `POSTGRES_DB` from `postgresql_1/postgres-docker/.env` |
-| User | `rimworld_web` |
-| Password | `RIMWORLD_WEB_DB_PASSWORD` from `postgresql_1/postgres-docker/.env` |
-
-Target local topology when all six services are integrated:
-
-```text
-Local Computer
-     |
-     v
-Docker Engine / Docker Desktop
-     |
-     v
-rimworld-together-on-vps-nonprod
-     |
-     +-- rimworld
-     +-- web
-     +-- postgres
-     +-- api
-     +-- worker
-     +-- nginx
-```
-
-During early development, it is acceptable to start only the required services.
-
-For example:
-
-**Stage 1:** RimWorld Together only
-
-**Stage 2:** RimWorld Together + API + Next.js
-
-**Stage 3:** Add PostgreSQL
-
-**Stage 4:** Add Worker and game management operations
-
-**Stage 5:** Add Nginx and production deployment configuration
-
-The objective is to avoid debugging the entire environment before verifying that the game server works independently.
-
-Local development should not require purchasing a VPS, public DNS, or public HTTPS certificates.
-
-The project should use environment-specific configuration without changing its fundamental service architecture.
-
----
-
-## 8. VPS Deployment Requirements
-
-The VPS should provide:
-
-- Linux (Ubuntu LTS preferred)
-- Docker Engine
-- Docker Compose plugin
-- SSH access
-- Firewall configuration
-- Persistent storage
-- Sufficient CPU, RAM, and disk for all six services
-
-Only required software should be installed directly on the VPS host.
-
-Application runtimes such as Node.js, Python, and PostgreSQL should run inside their containers rather than requiring separate host installations.
-
-Expected public ports:
-
-```text
-22/tcp       SSH administration (restricted)
-80/tcp       HTTP
-443/tcp      HTTPS
-25555/tcp    RimWorld Together Game Server
-```
-
-The game port should be verified against the selected server version.
-
-Do not publicly expose:
-
-```text
-3000         Next.js
-8000         FastAPI
-5432         PostgreSQL
-```
-
-The Python Worker must not expose a public port unless a documented requirement justifies it.
-
-Production security requirements:
-
-- Use SSH key authentication.
-- Configure appropriate firewall rules.
-- Secure application authentication.
-- Implement role-based authorization.
-- Protect passwords, tokens, and secrets.
-- Do not commit credentials to Git.
-- Avoid unrestricted Docker daemon access from web-facing containers.
-- Use persistent, restorable backups.
-- Maintain logs and audit history.
-
----
-
-## 9. Suggested Repository Structure
-
-```text
-vps-rimworld-together-env/
-|
-├── compose.yaml
-├── compose.override.yaml
-├── .env.example
-├── .gitignore
-├── README.md
-|
-├── apps/
-│   ├── web/
-│   │   └── Dockerfile
-│   │
-│   ├── api/
-│   │   └── Dockerfile
-│   │
-│   └── worker/
-│       └── Dockerfile
-|
-├── infra/
-│   └── nginx/
-│       └── nginx.conf
-|
-├── data/
-│   ├── rimworld/
-│   └── backups/
-|
-└── docs/
-    ├── architecture.md
-    └── deployment.md
-```
-
-This is a suggested repository structure, not a strict requirement.
-
-Use the official RimWorld Together image and official PostgreSQL and Nginx images where possible. Build local images for custom application services.
-
-Persistent runtime data, secrets, and local environment files must not be committed to Git.
-
----
-
-## 10. Development Priorities
-
-### Phase 1 — Game Server Environment
-
-- Verify official RimWorld Together Docker deployment.
-- Create Docker Compose configuration.
-- Start the game container.
-- Connect using the RimWorld client.
-- Create and test a world.
-- Verify data persistence.
-- Inspect real config and log files.
-
-### Phase 2 — Management Dashboard
-
-- Implement FastAPI.
-- Implement Next.js.
-- Add server status display.
-- Add log viewing.
-- Add authentication and admin/user roles.
-- Add PostgreSQL persistence.
-
-### Phase 3 — Administration and Recovery
-
-- Implement safe game start/stop/restart.
-- Implement supported configuration editing.
-- Add game backup and recovery.
-- Add operation history.
-- Add Python Worker health monitoring.
-- Implement world reset/creation workflows according to verified server capabilities.
-
-### Phase 4 — Extended Game Information
-
-- Investigate connected-player tracking.
-- Investigate player history.
-- Investigate game chat integration.
-- Add real-time dashboard updates where supported.
-
-Do not block earlier phases on features that require undocumented or unavailable RimWorld Together integrations.
-
----
-
-## 11. Instructions for Codex
-
-You are assisting with the architecture, implementation, and deployment of `vps-rimworld-together-env`.
-
-Treat this document as the project requirements and infrastructure context.
-
-### Your responsibilities
-
-1. Review this specification.
-2. Verify the current RimWorld Together server implementation and official Docker deployment requirements.
-3. Identify which requested features are directly supported.
-4. Identify which features require custom integration or modifications.
-5. Design the simplest working Docker Compose environment using the six specified services.
-6. Recommend practical internal networking and persistent storage.
-7. Design secure game-container lifecycle management without unnecessarily expanding the stack.
-8. Implement the project incrementally, starting from a working game server.
-9. Keep the environment compatible with both local development and VPS deployment.
-10. Document setup, startup, shutdown, configuration, backup, and recovery procedures.
-
-### Important rules
-
-- Do not add services without explaining why they are necessary.
-- Do not assume RimWorld Together exposes APIs that have not been verified.
-- Do not overwrite or delete game data during ordinary redeployment.
-- Do not restart the entire VPS when performing game management.
-- Do not restart unrelated containers when restarting the game.
-- Do not expose unnecessary container ports to the internet.
-- Do not give web-facing services unrestricted control of Docker.
-- Do not implement placeholder functionality that falsely reports real game state.
-- Prioritize functional correctness, data persistence, and security over unnecessary complexity.
-
-### Initial Codex Task
-
-Start by analyzing the six-container architecture and the official RimWorld Together repository.
-
-Determine the minimum viable Docker Compose configuration needed to run RimWorld Together locally with persistent game data.
-
-Then identify the safest and simplest way to extend that environment with Next.js, FastAPI, Python Worker, PostgreSQL, and Nginx.
-
-Before implementing advanced game management features, report which features are verified to work with RimWorld Together and which require additional investigation.
-
-The target result is a maintainable, self-hosted RimWorld Together Server Management Platform that can be developed locally and deployed to a single VPS using Docker Compose.
+RimWorld Together on VPS — Current Environment
+
+Target: Ubuntu Server 22.04 x86-64, Docker Engine and Compose >= 2.24.4.
+Host-side operator scripts use Python >= 3.10 (stdlib); FastAPI uses Python 3.12 in Docker.
+Fresh VPS Compose project: rimworld-together-vps
+Local development Compose project: rimworld-together-on-vps-nonprod
+Pinned game binary: upstream 26.8.31.1, Linux amd64, native listener TCP 25555.
+
+Services and access
+- web (Next.js/Node): loopback by default, host TCP 10005 -> container 3000.
+  Browser talks only to web. The server authenticates against PostgreSQL and
+  forwards allowlisted game actions to api:8000 using a private token.
+- api (FastAPI): port 8000 on app_network only. The API independently checks
+  each user's database role. Worker tasks run here, without another container.
+- postgres: port 5432 on app_network only. Named postgres_data volume. The web
+  and game API have separate SQL roles; neither is the PostgreSQL owner.
+- rimworld: independent game process supervised by Python; game binds inside
+  the container, with host TCP 25555 configurable. Public VPS default 0.0.0.0,
+  local development default 127.0.0.1. The API mounts game files read-only.
+- beekeeper: optional tool on host loopback port 5800. No browser GUI sign-in
+  by default; PostgreSQL still authenticates independently. Use an SSH tunnel.
+- A single app_network carries service traffic. No container has a Docker
+  socket mount. No proxy, extra worker container, or public DB/API is required.
+
+First install: sh deploy.sh; public IPv4 detection is best effort.
+Use RIMWORLD_PUBLIC_HOST=<your-IP-or-DNS> sh deploy.sh for a floating IP or NAT.
+See README.md and docs/operations.md for scoped deploy, backup, restore, rollback,
+port/firewall setup and external smoke tests.
+
+Persistence and startup
+- .rwt-deploy/game (VPS), data/nonprod/rimworld (local) holds native worlds,
+  saves, supported settings and accounts. First player to complete world
+  generation determines the shared seed in Assets/WorldValuesFile.json.
+- game_bridge (named volume) carries the allowlisted operation request,
+  stage, boot ID, heartbeat, interpreted event inputs and log spool.
+  The supervisor processes only known operations; it never controls Docker.
+- beekeeper_config saves local connection settings; it can be recreated.
+- PostgreSQL starts and must pass an authenticated SELECT before migrations.
+  The checksummed schema_migrations ledger records verified legacy baselines
+  or migrations applied under transactions and a PostgreSQL advisory lock.
+- API waits on PostgreSQL; web health checks DB and API contract. Game
+  readiness uses recent supervisor heartbeat, TCP, and a consistent current
+  world/config snapshot. The game can listen without the dashboard.
+- Release state and append-only operation outcomes are private under
+  .rwt-deploy. Scoped updates leave unrelated services and data intact.
+
+PostgreSQL tables
+- user_profile: Dashboard accounts (bcrypt); roles user/superuser.
+- dashboard_sessions / dashboard_login_budget: revocable session token
+  digests and persistent sign-in attempt limits.
+- world_config: native config snapshot, revision, initialized flag, boot ID.
+- server_log: parsed event and raw diagnostic log data, rolling 7 days;
+  a game config apply or factory reset starts a new log timeline.
+- player_data: account/settlement metadata, observed login/save, colony
+  name and size when the native save format supplies them.
+- player_online_sample / worker_sample: one-minute observations for 7 days.
+- schema_migrations: version, source checksum, timestamp, baseline, duration.
+
+Dashboard
+- Overview: read-only status, published address, shared seed, settings and
+  player activity as permitted by role. Worker: health, used/available RAM,
+  online player count, uptime and log, refreshing about once per minute.
+- Config server: editable native values grouped with descriptions and units.
+  Save stages changes; confirm Restart to apply. Allowed settings include
+  name/limits, chat/backup behavior, native action toggles/cooldowns,
+  compatible difficulty and enforcement, and existing event prices.
+  Native bind settings, world/seed, rules without native support, mod
+  membership/load order and event definition IDs are not editable here.
+  Road/site/event prices use Silver; cooldowns use milliseconds; backup
+  schedule uses hours.
+- Factory reset restores dashboard-editable native fields and game password
+  to defaults from the pinned binary and restarts only the game. Default
+  server-listing/telemetry settings come from upstream. World, saves, mod
+  membership and accounts remain intact.
+- Player accounts: dashboard users and game users are distinct. A confirmed
+  native resetplayer clears that player's active game data after the game's
+  backup. It keeps the game login and dashboard account. No mass reset is
+  part of any deployment.
+- Admin writes require an authenticated superuser and an allowed origin;
+  restart, factory reset and player reset also require explicit confirmation.
+
+Configuration inventory
+- Deploy/private compose.env: COMPOSE_PROJECT_NAME; RWT_WEB_ENV_FILE,
+  RWT_POSTGRES_ENV_FILE, RWT_GAME_DATA (managed paths); RIMWORLD_API_DB_NAME,
+  RIMWORLD_API_DB_PASSWORD (secret), RIMWORLD_API_TOKEN (secret).
+- Network: RIMWORLD_HOST_PORT/BIND, RIMWORLD_PUBLIC_HOST, RIMWORLD_WEB_PORT/BIND,
+  BEEKEEPER_WEB_PORT, RWT_BEEKEEPER_ENABLED (0/1).
+- Runtime options: TZ; POSTGRES_VERSION (pinned on first VPS installation);
+  RWT_WEB_MEMORY, RWT_API_MEMORY, RWT_POSTGRES_MEMORY, RWT_GAME_MEMORY,
+  RWT_GAME_CPUS (0/unset = no extra Compose limit).
+- Backup options: RWT_BACKUP_DIR, RWT_BACKUP_MAX_COUNT, RWT_BACKUP_MAX_DAYS,
+  RWT_BACKUP_MIN_KEEP.
+- postgres.env: POSTGRES_USER, POSTGRES_DB, POSTGRES_PASSWORD (secret),
+  RIMWORLD_WEB_DB_PASSWORD (secret), RIMWORLD_ADMIN_PASSWORD (initial seed
+  only; changing this env alone will not change an existing admin password).
+- web.env: DATABASE_URL (secret), SESSION_SECRET (secret), COOKIE_SECURE
+  (true only behind HTTPS), optional DASHBOARD_ORIGIN (exact browser origin,
+  including scheme/port).
+- Direct compose.prod.yaml use: RWT_WEB_IMAGE, RWT_API_IMAGE,
+  RWT_RIMWORLD_IMAGE, RWT_BEEKEEPER_IMAGE; set immutable references.
+  Managed release deployments use a validated per-service overlay for mixed
+  versions. Use project scripts to preserve release state and rollback.
+
+Limitations
+- Public HTTP is not encrypted. Optional dashboard bind is a deliberate
+  operator choice. Default to an SSH tunnel or an HTTPS reverse proxy.
+- Local backups help recovery from bad deployments/configuration; copy
+  them off host for VPS and disk loss. Treat backup files as secrets.
+- TCP readiness does not verify actual RimWorld client login or save
+  compatibility. Keep the upstream game version pinned until a separate
+  maintenance and compatibility test with real clients/saves.

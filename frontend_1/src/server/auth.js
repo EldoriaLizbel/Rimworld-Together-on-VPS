@@ -8,7 +8,7 @@
    re-read from PostgreSQL on every request, so edits/deletes apply at once. */
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
-import { query } from "./db";
+import { query } from "./db.js";
 
 export const SESSION_COOKIE = "rimworld_session";
 const SESSION_TTL_S = 60 * 60 * 8; // 8 hours
@@ -33,20 +33,21 @@ const b64url = (buf) => Buffer.from(buf).toString("base64url");
 const sign = (data) => crypto.createHmac("sha256", secret()).update(data).digest("base64url");
 
 export function createSessionToken(username) {
-  const payload = b64url(JSON.stringify({ u: username, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S }));
+  const payload = b64url(JSON.stringify({ u: username, n: crypto.randomBytes(24).toString("hex"),
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S }));
   return `${payload}.${sign(payload)}`;
 }
 
-function readSessionToken(token) {
+export function readSessionToken(token) {
   if (!token || typeof token !== "string") return null;
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return null;
+  const [payload, sig, extra] = token.split(".");
+  if (!payload || !sig || extra !== undefined) return null;
   const expected = Buffer.from(sign(payload));
   const given = Buffer.from(sig);
   if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
   try {
-    const { u, exp } = JSON.parse(Buffer.from(payload, "base64url").toString());
-    if (typeof u !== "string" || typeof exp !== "number" || exp < Date.now() / 1000) return null;
+    const { u, n, exp } = JSON.parse(Buffer.from(payload, "base64url").toString());
+    if (typeof u !== "string" || !/^[a-f0-9]{48}$/.test(n) || !Number.isInteger(exp) || exp <= Date.now() / 1000) return null;
     return u;
   } catch {
     return null;
@@ -62,6 +63,37 @@ export const cookieOptions = () => ({
 });
 
 const PUBLIC_COLS = "username, nickname, role, created_at, last_login";
+const tokenHash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+
+export async function startSession(username) {
+  const token = createSessionToken(username);
+  await query("DELETE FROM dashboard_sessions WHERE expires_at <= now()");
+  await query(
+    "INSERT INTO dashboard_sessions (token_hash, username, expires_at) VALUES ($1, $2, now() + interval '8 hours')",
+    [tokenHash(token), username]);
+  return token;
+}
+
+export async function endSession(request) {
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  if (readSessionToken(token)) await query("DELETE FROM dashboard_sessions WHERE token_hash = $1", [tokenHash(token)]);
+}
+
+export async function permitLogin(username) {
+  await query("DELETE FROM dashboard_login_budget WHERE expires_at <= now()");
+  const account = `user:${tokenHash(username)}`;
+  // Charge the bounded global budget first. A stream of new usernames cannot grow this table without bound.
+  for (const [bucket, limit, seconds] of [["global", 40, 60], [account, 8, 300]]) {
+    const { rowCount } = await query(`
+      INSERT INTO dashboard_login_budget (bucket, attempts, expires_at)
+        VALUES ($1, 1, now() + $3::integer * interval '1 second')
+      ON CONFLICT (bucket) DO UPDATE SET attempts = dashboard_login_budget.attempts + 1
+        WHERE dashboard_login_budget.attempts < $2
+      RETURNING attempts`, [bucket, limit, seconds]);
+    if (!rowCount) return false;
+  }
+  return true;
+}
 
 /** Verify username + password against user_profile. Returns the user or null. */
 export async function verifyLogin(username, password) {
@@ -76,9 +108,13 @@ export async function verifyLogin(username, password) {
 
 /** The signed-in user (fresh from the DB), or null. */
 export async function getSessionUser(request) {
-  const username = readSessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const username = readSessionToken(token);
   if (!username) return null;
-  const { rows } = await query(`SELECT ${PUBLIC_COLS} FROM user_profile WHERE username = $1`, [username]);
+  const { rows } = await query(`SELECT ${PUBLIC_COLS} FROM user_profile
+    WHERE username = $1 AND EXISTS (SELECT 1 FROM dashboard_sessions
+      WHERE token_hash = $2 AND dashboard_sessions.username = user_profile.username AND expires_at > now())`,
+  [username, tokenHash(token)]);
   return rows[0] || null;
 }
 

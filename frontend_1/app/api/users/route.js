@@ -1,6 +1,6 @@
 import { query } from "../../../src/server/db";
 import { hashPassword, PUBLIC_COLS } from "../../../src/server/auth";
-import { json, fail, handle, requireSuperuser } from "../../../src/server/http";
+import { json, fail, handle, readBody, requireSuperuser } from "../../../src/server/http";
 import { parseUserBody, mapDbError } from "../../../src/server/users";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,9 @@ export const POST = handle(async (request) => {
   const [, deny] = await requireSuperuser(request);
   if (deny) return deny;
   try {
-    const u = parseUserBody(await request.json().catch(() => ({})), "create");
+    const [data, error] = await readBody(request);
+    if (error) return error;
+    const u = parseUserBody(data.value, "create");
     const { rows } = await query(
       `INSERT INTO user_profile (username, nickname, password, role)
        VALUES ($1, $2, $3, $4)

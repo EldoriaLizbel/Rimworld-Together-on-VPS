@@ -1,0 +1,10 @@
+[tool.ruff]
+target-version = "py310"
+extend-exclude = ["Rimworld-Together", ".agents", "data", "frontend_1"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["apps/api", "scripts"]

@@ -1,9 +1,17 @@
 name: rimworld-together-on-vps-nonprod
 
+x-rotation: &rotation
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:${POSTGRES_VERSION:-16.4}
     restart: unless-stopped
+    logging: *rotation
+    mem_limit: ${RWT_POSTGRES_MEMORY:-0}
     env_file: ${RWT_POSTGRES_ENV_FILE:-./postgresql_1/postgres-docker/.env}
     environment:
       RIMWORLD_API_DB_PASSWORD: ${RIMWORLD_API_DB_PASSWORD:?RIMWORLD_API_DB_PASSWORD is required}
@@ -14,7 +22,7 @@ services:
     networks:
       - app_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -X -Atq -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -c 'SELECT 1' | grep -qx 1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -24,8 +32,12 @@ services:
     build:
       context: ./frontend_1
     ports:
-      - "127.0.0.1:${RIMWORLD_WEB_PORT:-10005}:3000"
+      - "${RIMWORLD_WEB_BIND:-127.0.0.1}:${RIMWORLD_WEB_PORT:-10005}:3000"
     restart: unless-stopped
+    logging: *rotation
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: ${RWT_WEB_MEMORY:-0}
     env_file: ${RWT_WEB_ENV_FILE:-./frontend_1/.env}
     environment:
       TZ: ${TZ:-Asia/Bangkok}
@@ -57,6 +69,7 @@ services:
       RIMWORLD_HOST_BIND: ${RIMWORLD_HOST_BIND:-127.0.0.1}
       RIMWORLD_PUBLIC_HOST: ${RIMWORLD_PUBLIC_HOST:-}
       RIMWORLD_HOST_PORT: ${RIMWORLD_HOST_PORT:-25555}
+      BEEKEEPER_ENABLED: ${RWT_BEEKEEPER_ENABLED:-1}
     volumes:
       - ${RWT_GAME_DATA:-./data/nonprod/rimworld}:/game:ro
       - game_bridge:/bridge
@@ -66,6 +79,10 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    logging: *rotation
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: ${RWT_API_MEMORY:-0}
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/healthz', timeout=2).close()"]
       interval: 5s
@@ -84,6 +101,7 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    logging: *rotation
     shm_size: 256m
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f '^/opt/beekeeper-studio/beekeeper-studio-bin ' >/dev/null && curl -fsS http://127.0.0.1:5800/ >/dev/null"]
@@ -98,6 +116,8 @@ services:
       target: rimworld
     ports:
       - "${RIMWORLD_HOST_BIND:-127.0.0.1}:${RIMWORLD_HOST_PORT:-25555}:25555/tcp"
+    mem_limit: ${RWT_GAME_MEMORY:-0}
+    cpus: ${RWT_GAME_CPUS:-0}
     volumes:
       - ${RWT_GAME_DATA:-./data/nonprod/rimworld}:/Data
       - game_bridge:/bridge
@@ -109,7 +129,7 @@ services:
         max-size: "20m"
         max-file: "5"
     healthcheck:
-      test: ["CMD", "/usr/bin/python3", "-c", "import json; from datetime import datetime, timezone; b=json.load(open('/bridge/boot.json')); assert b['status']=='ready' and (datetime.now(timezone.utc)-datetime.fromisoformat(b['heartbeat_at'])).total_seconds()<10"]
+      test: ["CMD", "/usr/bin/python3", "-c", "import json,sys; from datetime import datetime, timezone; sys.path.insert(0,'/opt/rwt'); from supervisor import listening; b=json.load(open('/bridge/boot.json')); assert b['status']=='ready' and (datetime.now(timezone.utc)-datetime.fromisoformat(b['heartbeat_at'])).total_seconds()<10 and listening(25555)"]
       interval: 5s
       timeout: 3s
       retries: 8
