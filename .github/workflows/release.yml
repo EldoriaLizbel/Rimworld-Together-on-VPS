@@ -29,7 +29,7 @@ jobs:
           docker pull --platform linux/amd64 "postgres:$postgres"
           docker tag "postgres:$postgres" rwt-postgres:ci
       - name: Gate fixed high and critical findings in owned runtime images
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rwt-web:ci
           version: v0.71.2
@@ -37,7 +37,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
           scanners: vuln
-      - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: rwt-api:ci
           severity: HIGH,CRITICAL
