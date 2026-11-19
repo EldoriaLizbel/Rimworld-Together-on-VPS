@@ -17,7 +17,7 @@ maintenance=$4
 dry_run=$5
 [ "${#release}" -eq 40 ] || exit 2
 case "$release" in *[!0-9a-f]*) exit 2;; esac
-case "$scope" in all|app|web|api|rimworld|beekeeper) ;; *) exit 2;; esac
+case "$scope" in all|app|web|api|rimworld) ;; *) exit 2;; esac
 case "$maintenance:$dry_run" in 0:0|0:1|1:0|1:1) ;; *) exit 2;; esac
 set -- --version "$release" --scope "$scope"
 [ "$maintenance" = 0 ] || set -- "$@" --maintenance

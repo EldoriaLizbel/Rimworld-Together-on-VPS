@@ -89,7 +89,6 @@ if [ ! -e "$deploy_dir" ]; then
     game_port=${RIMWORLD_HOST_PORT:-25555}
     web_port=${RIMWORLD_WEB_PORT:-10005}
     web_bind=${RIMWORLD_WEB_BIND:-127.0.0.1}
-    beekeeper_port=${BEEKEEPER_WEB_PORT:-5800}
     case "$project" in ''|[!a-z0-9]*|*[!a-z0-9_-]*) fail 'Invalid Compose project name.';; esac
     case "$public_host" in *[!A-Za-z0-9.:-]*) fail 'Use an IP address or DNS name without a URL scheme for RIMWORLD_PUBLIC_HOST.';; esac
     if [ -z "$public_host" ]; then
@@ -101,9 +100,9 @@ if [ ! -e "$deploy_dir" ]; then
         fi
     fi
     case "$game_bind" in ''|*[!0-9.]*) fail 'RIMWORLD_HOST_BIND must be an IPv4 address.';; esac
-    port "$game_port"; port "$web_port"; port "$beekeeper_port"
-    [ "$game_port" -ne "$web_port" ] && [ "$game_port" -ne "$beekeeper_port" ] && [ "$web_port" -ne "$beekeeper_port" ] \
-        || fail 'Choose distinct game, dashboard, and Beekeeper ports.'
+    port "$game_port"; port "$web_port"
+    [ "$game_port" -ne "$web_port" ] \
+        || fail 'Choose distinct game and dashboard ports.'
     say "Generating deployment configuration for $project"
     umask 077
     scratch=$(mktemp -d .rwt-deploy.XXXXXX)
@@ -123,8 +122,6 @@ RIMWORLD_HOST_PORT=$game_port
 RIMWORLD_PUBLIC_HOST=$public_host
 RIMWORLD_WEB_PORT=$web_port
 RIMWORLD_WEB_BIND=$web_bind
-BEEKEEPER_WEB_PORT=$beekeeper_port
-RWT_BEEKEEPER_ENABLED=${RWT_BEEKEEPER_ENABLED:-1}
 POSTGRES_VERSION=16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
 EOF
     cat > "$scratch/postgres.env" <<EOF
@@ -161,10 +158,9 @@ python3 scripts/ops.py bootstrap "$@"
 public_host=$(sed -n 's/^RIMWORLD_PUBLIC_HOST=//p' "$compose_env")
 game_port=$(sed -n 's/^RIMWORLD_HOST_PORT=//p' "$compose_env")
 web_port=$(sed -n 's/^RIMWORLD_WEB_PORT=//p' "$compose_env")
-beekeeper_port=$(sed -n 's/^BEEKEEPER_WEB_PORT=//p' "$compose_env")
 say "Ready. Game endpoint: ${public_host:-<VPS-public-IP>}:${game_port}/tcp"
 say "Allow inbound TCP $game_port in your VPS provider's firewall for external players."
-say "Use the dashboard and Beekeeper through SSH when bound to loopback. From your computer:"
-printf '  ssh -N -L %s:127.0.0.1:%s -L %s:127.0.0.1:%s user@%s\n' \
-    "$web_port" "$web_port" "$beekeeper_port" "$beekeeper_port" "${public_host:-<VPS-public-IP>}"
+say "Use the dashboard through SSH when bound to loopback. From your computer:"
+printf '  ssh -N -L %s:127.0.0.1:%s user@%s\n' \
+    "$web_port" "$web_port" "${public_host:-<VPS-public-IP>}"
 say "Dashboard user: rimworldtogether. Initial password: RIMWORLD_ADMIN_PASSWORD in $deploy_dir/postgres.env"

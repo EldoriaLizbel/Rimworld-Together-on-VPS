@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, Loader2, LogOut, Moon, RadioTower, Settings2, Sun, Users } from "lucide-react";
+import { Activity, Database, Loader2, LogOut, Moon, RadioTower, Settings2, Sun, Users } from "lucide-react";
+import ServerData from "./views/ServerData";
 import LoginPage from "./views/LoginPage";
 import ConfigurePage from "./views/ConfigurePage";
 import { ServerOverview, WorkerDashboard, GameConfig } from "./views/GamePage";
@@ -12,6 +13,7 @@ const pages = [
   { id: "worker", label: "Worker", short: "Worker", Icon: Activity, admin: true },
   { id: "accounts", label: "Player accounts", short: "Accounts", Icon: Users, admin: true },
   { id: "config", label: "Config server", short: "Config", Icon: Settings2, admin: true },
+  { id: "data", label: "Server data", short: "Data", Icon: Database, admin: true },
 ];
 
 function currentView() {
@@ -149,6 +151,7 @@ export default function App() {
           {active.id === "overview" && <ServerOverview c={c} isAdmin={admin} />}
           {active.id === "worker" && <WorkerDashboard c={c} />}
           {active.id === "config" && <GameConfig c={c} />}
+          {active.id === "data" && <ServerData c={c} />}
           {active.id === "accounts" && <ConfigurePage c={c} me={user} onSelfChanged={refreshMe} />}
         </main>
       </div>

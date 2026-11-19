@@ -69,7 +69,6 @@ services:
       RIMWORLD_HOST_BIND: ${RIMWORLD_HOST_BIND:-127.0.0.1}
       RIMWORLD_PUBLIC_HOST: ${RIMWORLD_PUBLIC_HOST:-}
       RIMWORLD_HOST_PORT: ${RIMWORLD_HOST_PORT:-25555}
-      BEEKEEPER_ENABLED: ${RWT_BEEKEEPER_ENABLED:-1}
     volumes:
       - ${RWT_GAME_DATA:-./data/nonprod/rimworld}:/game:ro
       - game_bridge:/bridge
@@ -88,27 +87,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 8
-
-  beekeeper:
-    build: ./infra/beekeeper
-    ports:
-      - "127.0.0.1:${BEEKEEPER_WEB_PORT:-5800}:5800"
-    volumes:
-      - beekeeper_config:/config
-    networks:
-      - app_network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    logging: *rotation
-    shm_size: 256m
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f '^/opt/beekeeper-studio/beekeeper-studio-bin ' >/dev/null && curl -fsS http://127.0.0.1:5800/ >/dev/null"]
-      interval: 5s
-      timeout: 3s
-      retries: 6
-      start_period: 15s
 
   rimworld:
     build:
@@ -141,7 +119,6 @@ services:
 
 volumes:
   postgres_data:
-  beekeeper_config:
   game_bridge:
 
 networks:

@@ -109,11 +109,9 @@ async def service_checks(pool, game_status):
         except (Error, PoolTimeout, TimeoutError):
             return False
 
-    web, postgres, beekeeper = await asyncio.gather(
+    web, postgres = await asyncio.gather(
         asyncio.to_thread(http_ready, "web", 3000, "/api/health"),
         postgres_ready(),
-        asyncio.to_thread(http_ready, "beekeeper", 5800, "/") if os.getenv("BEEKEEPER_ENABLED", "1") == "1"
-        else asyncio.sleep(0, result="disabled"),
     )
     game = "healthy" if game_status == "ready" else game_status
     return [
@@ -124,7 +122,6 @@ async def service_checks(pool, game_status):
             ("api", True, "FastAPI response"),
             ("postgres", postgres, "PostgreSQL query"),
             ("rimworld", game, "Game listener and heartbeat"),
-            ("beekeeper", beekeeper, "Beekeeper HTTP interface"),
         )
     ]
 

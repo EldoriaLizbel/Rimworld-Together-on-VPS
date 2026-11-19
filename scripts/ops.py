@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "EldoriaLizbel/Rimworld-Together-on-VPS"
 REGISTRY = f"ghcr.io/{REPOSITORY.lower()}"
 GAME_VERSION = "26.8.31.1"
-SERVICES = ("api", "web", "beekeeper", "rimworld")
+SERVICES = ("api", "web", "rimworld")
 SCOPES = ("all", "app", *SERVICES)
 SHA = re.compile(r"[0-9a-f]{40}")
 PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
@@ -151,7 +151,8 @@ def manifest(data, version):
     if (data.get("format") != 1 or data.get("commit") != version or not SHA.fullmatch(version)
             or data.get("platform") != "linux/amd64" or data.get("game") != GAME_VERSION):
         abort("Release commit, platform or upstream game version is incompatible")
-    images = data["images"]
+    images = {key: value for key, value in data["images"].items() if key != "beekeeper"}
+    data = {**data, "images": images}
     if set(images) != set(SERVICES) or not all(
         re.fullmatch(rf"{REGISTRY}-{service}@sha256:[a-f0-9]{{64}}", images[service]) for service in SERVICES
     ):
@@ -171,13 +172,9 @@ class Stack:
         if not PROJECT.fullmatch(self.project):
             abort("Invalid Compose project name")
         self.game = self.folder / "game"
-        self.tools = cfg.get("RWT_BEEKEEPER_ENABLED", "1") == "1"
-        if cfg.get("RWT_BEEKEEPER_ENABLED", "1") not in ("0", "1"):
-            abort("RWT_BEEKEEPER_ENABLED must be 0 or 1")
         self.ports = {
             "rimworld": ("RIMWORLD_HOST_BIND", "RIMWORLD_HOST_PORT", "0.0.0.0", 25555),
             "web": ("RIMWORLD_WEB_BIND", "RIMWORLD_WEB_PORT", "127.0.0.1", 10005),
-            **({"beekeeper": ("", "BEEKEEPER_WEB_PORT", "127.0.0.1", 5800)} if self.tools else {}),
         }
         ports = set()
         for bind_key, port_key, default_bind, default_port in self.ports.values():
@@ -239,7 +236,7 @@ class Stack:
     def compose(self, *args, refs=None, no_init=False, **kwargs):
         base = ("compose", "--ansi", "never", "--env-file", str(self.envfile),
                 "-p", self.project, "-f", str(ROOT / "compose.yaml"))
-        if not refs and not no_init and self.tools:
+        if not refs and not no_init:
             return self.command(*base, *args, **kwargs)
         # Compose needs its stdin for psql/Node reads, so put the non-secret overlay
         # in a private temporary file, never in tracked source.
@@ -247,8 +244,6 @@ class Stack:
             file = Path(tmp) / "overlay.yaml"
             overlay = ["services:"]
             by_service = {key: ["build: !reset null", f"image: {ref}"] for key, ref in (refs or {}).items()}
-            if not self.tools:
-                by_service.setdefault("beekeeper", []).append("profiles: [tools]")
             if no_init:
                 overlay += ["  postgres:", "    volumes: !override",
                             "      - postgres_data:/var/lib/postgresql/data"]
@@ -531,10 +526,6 @@ def capture_backup(stack, scope, keep_game_stopped=False):
 def scopes(stack, requested):
     selected = [service for service in SERVICES if requested in ("all", service)
                 or requested == "app" and service in ("api", "web")]
-    if not stack.tools and "beekeeper" in selected:
-        if requested == "beekeeper":
-            abort("Enable Beekeeper in compose.env before deploying it")
-        selected.remove("beekeeper")
     return selected
 
 
@@ -822,7 +813,7 @@ def restore(stack, request):
     defaults = dict(COMPOSE_PROJECT_NAME=request.new_project, RWT_WEB_ENV_FILE=(destination / "web.env").as_posix(),
                     RWT_POSTGRES_ENV_FILE=(destination / "postgres.env").as_posix(),
                     RWT_GAME_DATA=(destination / "game").as_posix(), RIMWORLD_HOST_BIND="127.0.0.1",
-                    RIMWORLD_WEB_BIND="127.0.0.1", RWT_BEEKEEPER_ENABLED="0",
+                    RIMWORLD_WEB_BIND="127.0.0.1",
                     RIMWORLD_HOST_PORT=str(port(request.game_port)), RIMWORLD_WEB_PORT=str(port(request.web_port)))
     recovered.update(defaults)
     for name in ("postgres.env", "web.env"):

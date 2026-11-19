@@ -187,6 +187,22 @@ export function ServerOverview({ c, isAdmin }) {
           <PlayerActivity c={c} />
         </div>
       )}
+      <section className={`rt-panel min-w-0 rounded-xl p-4 ${c.card} ${c.title}`}>
+        <PanelHeading Icon={Settings2}>Server modlist</PanelHeading>
+        <p className={`mt-1 text-xs ${c.label}`}>Mods recorded by the game server from the world creator or the in-game Admin Panel.</p>
+        {data.mods?.length ? (
+          <ul className="mt-3 grid max-h-72 gap-2 overflow-auto sm:grid-cols-2 xl:grid-cols-3" aria-label="Server mods">
+            {data.mods.map((mod, index) => (
+              <li key={`${mod.ModID}-${index}`} className={`rounded-lg border p-3 border-[color:var(--border)]`}>
+                <p className="break-words text-sm font-medium">{mod.ModName || mod.Name || mod.ModID}</p>
+                <p className={`mt-1 break-all font-mono text-xs ${c.label}`}>{mod.ModID}</p>
+              </li>
+            ))}
+          </ul>
+        ) : <p role="status" className={`mt-4 text-sm ${c.label}`}>
+          {data.world_initialized ? "No mods have been recorded yet." : "Waiting for the first player to create the world and submit its modlist."}
+        </p>}
+      </section>
     </div>
   );
 }
@@ -355,9 +371,9 @@ export function GameConfig({ c }) {
     file === "Configs/BackupConfig.json" && ["Amount", "AutomaticDeletion"].includes(key));
   const dialogs = {
     "factory-reset": {
-      title: "Restore official defaults and restart?", label: "Confirm factory reset",
+      title: "Restore server defaults and restart?", label: "Confirm factory reset",
       message: "This replaces editable server settings, clears the game password and saved edits, disconnects players, and starts a new log history. " +
-        "Official defaults enable public listing and telemetry. World data, saves, accounts, mod lists and individual event definitions are kept.",
+        "Official defaults enable Sites, Roads, public listing and telemetry. World data, saves, accounts and mod lists are kept.",
     },
     restart: { title: "Restart the game server?", label: "Confirm restart",
       message: "Connected players will be disconnected. Ask them to save first." +
@@ -467,7 +483,7 @@ export function GameConfig({ c }) {
       <section className={`rt-panel flex flex-wrap items-center justify-between gap-3 rounded-xl p-4 ${c.card} ${c.title}`}>
         <div>
           <h2 className="text-sm font-semibold">Factory reset</h2>
-          <p className={`text-xs ${c.label}`}>Restore the official configuration and restart the game server. World and player saves are kept.</p>
+          <p className={`text-xs ${c.label}`}>Restore official server defaults, then restart the game server.</p>
         </div>
         <button type="button" disabled={!editable || overview?.status !== "ready" || changes.length > 0 || Boolean(password)}
           onClick={() => setConfirmation("factory-reset")} className="rt-button rt-danger-button">Factory reset</button>

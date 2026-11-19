@@ -62,10 +62,10 @@ jobs:
             git --redact --no-banner /repo
       - name: Validate shell scripts
         run: |
-          for script in deploy.sh scripts/*.sh infra/beekeeper/startapp.sh; do sh -n "$script"; done
+          for script in deploy.sh scripts/*.sh; do sh -n "$script"; done
           docker run --rm -v "$PWD:/src:ro" -w /src \
             koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
-            deploy.sh scripts/*.sh infra/beekeeper/startapp.sh
+            deploy.sh scripts/*.sh
           docker run --rm -v "$PWD:/src:ro" -w /src \
             rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       - run: python3 tests/compose_check.py

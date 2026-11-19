@@ -1,8 +1,8 @@
 # GitHub Actions และการตั้งค่า production
 
-Push/PR ที่มีปลายทางเป็น `main` จะรัน lint, unit tests, frontend build, dependency audit, สแกน secret แบบปกปิดค่า, ตรวจ Compose และทดสอบ Docker stack ชั่วคราว เมื่อ push เข้า `main` และผ่านทั้งหมดจะ build images สำหรับ Linux amd64 แล้วสแกนก่อนเผยแพร่ `web`, `api`, `rimworld`, `beekeeper` ไป GHCR เป็น `sha-<SHA40>` และแนบ `release.json` ใน `release-<SHA40>` Deploy ใช้ digest ใน manifest ไม่ได้ตัดสินใจจาก tag ที่เคลื่อนได้
+Push/PR ที่มีปลายทางเป็น `main` จะรัน lint, unit tests, frontend build, dependency audit, สแกน secret แบบปกปิดค่า, ตรวจ Compose และทดสอบ Docker stack ชั่วคราว เมื่อ push เข้า `main` และผ่านทั้งหมดจะ build images สำหรับ Linux amd64 แล้วสแกนก่อนเผยแพร่ `web`, `api`, `rimworld` ไป GHCR เป็น `sha-<SHA40>` และแนบ `release.json` ใน `release-<SHA40>` Deploy ใช้ digest ใน manifest ไม่ได้ตัดสินใจจาก tag ที่เคลื่อนได้
 
-`npm audit` บล็อกความเสี่ยงระดับ high/critical; `pip-audit` บล็อกเมื่อ dependency มี advisory; Trivy บล็อก high/critical ที่มีรุ่นแก้ใน image ของเว็บ/API และรายงานความเสี่ยงของ PostgreSQL, RimWorld และ Beekeeper ที่อาศัย upstream แยกกัน ตรวจผลก่อนเปิดบริการสู่ผู้ใช้และติดตาม upstream; โดยเฉพาะอย่าเปิด Beekeeper สู่ Internet และอย่าอัปเกรด binary เกมโดยอัตโนมัติเพื่อปิดผลสแกน
+`npm audit` บล็อกความเสี่ยงระดับ high/critical; `pip-audit` บล็อกเมื่อ dependency มี advisory; Trivy บล็อก high/critical ที่มีรุ่นแก้ใน image ของเว็บ/API และรายงานความเสี่ยงของ PostgreSQL และ RimWorld ที่อาศัย upstream แยกกัน ตรวจผลก่อนเปิดบริการสู่ผู้ใช้และติดตาม upstream; อย่าอัปเกรด binary เกมโดยอัตโนมัติเพื่อปิดผลสแกน
 
 ## ตั้งค่าเองครั้งเดียว
 
@@ -23,7 +23,7 @@ Push/PR ที่มีปลายทางเป็น `main` จะรัน 
    restrict,command="/absolute/checkout/scripts/ssh-deploy.sh" <public-key>
    ```
    ไฟล์ `scripts/ssh-deploy.sh` ต้อง executable (`chmod 755 scripts/ssh-deploy.sh`) คีย์นี้เรียกได้เฉพาะ protocol ที่รับ release SHA, scope, maintenance และ dry run ไม่มี interactive shell ห้ามปิด host key checking
-6. เปิด SSH ให้ runner ที่ตั้งใจใช้งาน และเปิด TCP 25555 ให้ผู้เล่นใน provider firewall คง TCP 10005, 5800, 8000 และ 5432 แบบ private ยกเว้น dashboard ที่เลือกเปิดเอง จัดเตรียมตำแหน่งสำรองข้อมูลนอก VPS และตั้ง timezone ตามต้องการ (เวลาใน manifest ใช้ UTC)
+6. เปิด SSH ให้ runner ที่ตั้งใจใช้งาน และเปิด TCP 25555 ให้ผู้เล่นใน provider firewall คง TCP 10005, 8000 และ 5432 แบบ private ยกเว้น dashboard ที่เลือกเปิดเอง จัดเตรียมตำแหน่งสำรองข้อมูลนอก VPS และตั้ง timezone ตามต้องการ (เวลาใน manifest ใช้ UTC)
 
 ## Deploy
 

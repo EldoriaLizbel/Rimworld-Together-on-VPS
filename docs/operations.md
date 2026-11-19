@@ -16,7 +16,7 @@
 | อัปเดตเกมในเวลาปิดให้บริการ | `sh scripts/deploy-release.sh --version <SHA40> --scope rimworld --maintenance` |
 | ติดตั้ง release ทั้งชุด | `sh scripts/deploy-release.sh --version <SHA40> --scope all` |
 | อัปเดตทั้งชุดเมื่อมีการเปลี่ยนเกม | เพิ่ม `--maintenance` |
-| อัปเดตจากซอร์สเฉพาะบริการ | `python3 scripts/ops.py bootstrap --scope app` (หรือ `web`, `api`, `rimworld`, `beekeeper`) |
+| อัปเดตจากซอร์สเฉพาะบริการ | `python3 scripts/ops.py bootstrap --scope app` (หรือ `web`, `api`, `rimworld`) |
 
 ระบุ SHA เต็ม 40 ตัวจาก Release ของ GitHub คำสั่งจะอ่าน manifest ตรวจความเข้ากันได้และดึง image ด้วย digest โดยใช้การตั้งค่าจาก `.rwt-deploy/compose.env` เฉพาะโปรเจกต์เดิม ไม่เปลี่ยนรหัสผ่าน ฐานข้อมูล หรือที่อยู่ไฟล์เกม
 
@@ -26,7 +26,6 @@ Release จะล้มเหลวหาก migration ใน checkout ไม่
 
 Dashboards ที่ใช้ SSH tunnel ให้คง `RIMWORLD_WEB_BIND=127.0.0.1` เป็นค่าเริ่มต้น หากต้องการให้เข้า `http://VPS_IP:10005` โดยเจตนา ให้ตั้งค่า `RIMWORLD_WEB_BIND=0.0.0.0` ใน `compose.env` จากนั้น deploy เฉพาะเว็บและจำกัด TCP 10005 ให้เปิดเฉพาะ IP ที่เชื่อถือได้ใน firewall ของผู้ให้บริการ HTTP แบบนี้ไม่เข้ารหัส สำหรับ HTTPS proxy ให้คง loopback bind ตั้ง `DASHBOARD_ORIGIN=https://<your-host>` และ `COOKIE_SECURE=true` ใน `web.env` แล้ว deploy เฉพาะเว็บ ใช้ origin เดียวกันกับที่ผู้ใช้เปิดจริง
 
-Beekeeper เป็นเครื่องมือเสริม เข้าได้ทาง SSH tunnel โดยไม่ต้องมีการลงชื่อเข้าใช้หน้า GUI; PostgreSQL ตรวจ credential แยกกัน หากปิด ให้ตั้ง `RWT_BEEKEEPER_ENABLED=0` (ติดตั้งครั้งแรกตั้งค่าก่อน `sh deploy.sh` ได้) และหยุด container เดิมด้วย `docker compose --env-file .rwt-deploy/compose.env stop beekeeper` หากกำลังรันอยู่
 
 ## สำรองและกู้คืน
 

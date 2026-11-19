@@ -21,6 +21,7 @@ from rwt_files import (
 )
 from sync import GAME, current_state, follow
 from worker import host_resources, interpret_log, service_checks
+from server_data import catalog, records
 
 
 @asynccontextmanager
@@ -78,6 +79,10 @@ class Change(BaseModel):
     value: StrictBool | StrictInt | StrictFloat | StrictStr
 
 
+app.add_api_route("/data-tables", catalog, methods=["GET"], dependencies=[Depends(administrator)])
+app.add_api_route("/data-rows/{table}", records, methods=["GET"], dependencies=[Depends(administrator)])
+
+
 class ConfigurationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -98,7 +103,8 @@ async def overview(request: Request):
     boot, pending, game_status = current_state()
     async with request.app.state.pool.connection() as conn:
         config = await (await conn.execute("""
-            SELECT settings -> 'Configs/ServerConfig.json' AS server, world_initialized, boot_id
+            SELECT settings -> 'Configs/ServerConfig.json' AS server,
+                   settings -> 'Configs/ModConfig.json' AS mods, world_initialized, boot_id
             FROM world_config
             """)).fetchone()
         counts = await (await conn.execute("SELECT count(*) AS registered FROM player_data")).fetchone()
@@ -118,6 +124,10 @@ async def overview(request: Request):
             "host_port": int(os.environ["RIMWORLD_HOST_PORT"]),
         },
         "world_initialized": bool(config and config["world_initialized"]), "players": counts["registered"],
+        "mods": [
+            {key: item[key] for key in ("ModID", "Name", "ModName", "Type") if key in item}
+            for item in ((config or {}).get("mods") or {}).get("ModConfigs", []) if isinstance(item, dict)
+        ],
     }
 
 

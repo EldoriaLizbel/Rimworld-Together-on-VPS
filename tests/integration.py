@@ -45,7 +45,6 @@ def fixture(root, project, ports):
         RIMWORLD_API_DB_PASSWORD=SECRET, RIMWORLD_API_TOKEN=SECRET,
         RIMWORLD_HOST_BIND="127.0.0.1", RIMWORLD_HOST_PORT=ports[0],
         RIMWORLD_WEB_BIND="127.0.0.1", RIMWORLD_WEB_PORT=ports[1],
-        BEEKEEPER_WEB_PORT=ports[2], RWT_BEEKEEPER_ENABLED=1,
         POSTGRES_VERSION="16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8",
     ))
     env(root / "postgres.env", dict(POSTGRES_USER="app_user", POSTGRES_DB="app_db",
@@ -86,12 +85,19 @@ def auth(base):
     token = cookie.split(";")[0]
     http(base, "/api/auth/me", 200, cookie=token)
     http(base, "/api/game/config", 200, cookie=token)
+    data, _ = http(base, "/api/game/data-tables", 200, cookie=token)
+    assert len(data["tables"]) == 5
+    for entry in data["tables"]:
+        http(base, "/api/game/data-rows?table=" + entry["name"], 200, cookie=token)
+    http(base, "/api/game/data-rows?table=user_profile", 404, cookie=token)
+    http(base, "/api/game/data-tables", 401)
     http(base, "/api/game/factory-reset", 422, method="POST", payload={}, cookie=token)
     http(base, "/api/users", 201, method="POST", payload={"username": "regular", "role": "user", "password": PASSWORD},
          cookie=token)
     _, player = http(base, "/api/auth/login", 200, method="POST", payload={"username": "regular", "password": PASSWORD})
     player = player.split(";")[0]
     http(base, "/api/game/overview", 200, cookie=player)
+    http(base, "/api/game/data-tables", 403, cookie=player)
     http(base, "/api/game/restart", 403, method="POST", payload={"confirm": "restart"}, cookie=player)
     http(base, "/api/auth/logout", 200, method="POST", cookie=token)
     http(base, "/api/auth/me", 401, cookie=token)
@@ -149,6 +155,8 @@ def test_live(root, project, recovered, ports):
     assert not stack.containers("postgres")
     options.dry_run = False
     ops.apply_release(stack, options, local=True)
+    assert json.loads((stack.game / "Configs/Actions/Site.json").read_text())["IsEnabled"] is True
+    assert json.loads((stack.game / "Configs/Actions/Road.json").read_text())["IsEnabled"] is True
     assert stack.schema("status") == [f"applied {i:03}" for i in range(1, 8)]
     assert stack.sql("SELECT count(*) FROM schema_migrations;") == "7"
     migration_transaction(stack, root)

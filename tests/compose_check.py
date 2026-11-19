@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix="rwt-compose-test-") as tmp:
         assert set(services) == {"postgres", *integration.ops.SERVICES}
         for key in ("postgres", "api"):
             assert not services[key].get("ports")
-        for key in ("web", "beekeeper"):
+        for key in ("web",):
             assert services[key]["ports"][0]["host_ip"] == "127.0.0.1"
         assert services["rimworld"]["ports"][0]["target"] == 25555
         assert services["rimworld"]["ports"][0]["protocol"] == "tcp"
@@ -30,5 +30,4 @@ with tempfile.TemporaryDirectory(prefix="rwt-compose-test-") as tmp:
         assert all("docker.sock" not in json.dumps(service.get("volumes", [])) for service in services.values())
         assert model["volumes"]["postgres_data"]["name"] == "rwt-ci-config-only_postgres_data"
     assert all("build" not in prod["services"][service] for service in integration.ops.SERVICES)
-    assert prod["services"]["beekeeper"]["profiles"] == ["tools"]
     print("Development and digest-only Production Compose validated.")

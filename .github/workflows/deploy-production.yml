@@ -9,7 +9,7 @@ on:
       scope:
         description: Services to deploy
         type: choice
-        options: [web, app, api, rimworld, beekeeper, all]
+        options: [web, app, api, rimworld, all]
         default: web
       maintenance:
         description: Approve game downtime if replacing the game container
@@ -53,7 +53,7 @@ jobs:
           : "${SSH_KEY:?Set production environment secret VPS_SSH_PRIVATE_KEY}"
           : "${SSH_HOSTS:?Set production environment secret VPS_SSH_KNOWN_HOSTS}"
           [[ "$RELEASE" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid release SHA' >&2; exit 2; }
-          case "$SCOPE" in web|app|api|rimworld|beekeeper|all) ;; *) exit 2;; esac
+          case "$SCOPE" in web|app|api|rimworld|all) ;; *) exit 2;; esac
           [[ "$VPS_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.:-]{0,252}$ ]] || exit 2
           [[ "$VPS_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$VPS_USER" != root ]] || exit 2
           port="${VPS_SSH_PORT:-22}"

@@ -4,7 +4,7 @@ import { fail, handle, json, readBody } from "../../../../src/server/http";
 export const dynamic = "force-dynamic";
 
 const routes = {
-  GET: new Set(["overview", "config", "players", "logs", "worker-health", "online-history"]),
+  GET: new Set(["overview", "config", "players", "logs", "worker-health", "online-history", "data-tables", "data-rows"]),
   PATCH: new Set(["config", "password"]),
   DELETE: new Set(["config"]),
   POST: new Set(["restart", "factory-reset", "player-reset"]),
@@ -28,6 +28,13 @@ const forward = handle(async (request, { params }) => {
     headers["Content-Type"] = "application/json";
   }
   const target = new URL(`/${action}`, process.env.RIMWORLD_API_URL);
+  if (action === "data-rows") {
+    const table = request.nextUrl.searchParams.get("table") || "";
+    const allowed = new Set(["world_config", "server_log", "player_data", "player_online_sample", "worker_sample"]);
+    if (!allowed.has(table)) return fail(404, "Unknown server data table");
+    target.pathname = `/data-rows/${table}`;
+    target.searchParams.set("page", request.nextUrl.searchParams.get("page") || "0");
+  }
   if (action === "logs") {
     for (const key of ["limit", "before"]) {
       const value = request.nextUrl.searchParams.get(key);

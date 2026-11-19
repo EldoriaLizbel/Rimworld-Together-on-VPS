@@ -25,7 +25,6 @@ jobs:
           docker build --platform linux/amd64 --tag rwt-web:ci frontend_1
           docker build --platform linux/amd64 --target api --tag rwt-api:ci apps/api
           docker build --platform linux/amd64 --target rimworld --tag rwt-rimworld:ci apps/api
-          docker build --platform linux/amd64 --tag rwt-beekeeper:ci infra/beekeeper
           postgres="$(sed -n 's/^POSTGRES_VERSION=//p' deploy.sh)"
           docker pull --platform linux/amd64 "postgres:$postgres"
           docker tag "postgres:$postgres" rwt-postgres:ci
@@ -49,7 +48,7 @@ jobs:
       - name: Report high and critical upstream image findings
         shell: bash
         run: |
-          for svc in postgres rimworld beekeeper; do
+          for svc in postgres rimworld; do
             printf '::group::%s upstream image findings\n' "$svc"
             trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 "rwt-$svc:ci"
             printf '::endgroup::\n'
@@ -69,7 +68,7 @@ jobs:
           registry="ghcr.io/${GITHUB_REPOSITORY,,}"
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io >/dev/null' EXIT
-          for service in api web beekeeper rimworld; do
+          for service in api web rimworld; do
             tag="$registry-$service:sha-$GITHUB_SHA"
             docker tag "rwt-$service:ci" "$tag"
             docker push "$tag" | tee "$RUNNER_TEMP/$service.push"

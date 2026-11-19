@@ -17,8 +17,6 @@ Services and access
 - rimworld: independent game process supervised by Python; game binds inside
   the container, with host TCP 25555 configurable. Public VPS default 0.0.0.0,
   local development default 127.0.0.1. The API mounts game files read-only.
-- beekeeper: optional tool on host loopback port 5800. No browser GUI sign-in
-  by default; PostgreSQL still authenticates independently. Use an SSH tunnel.
 - A single app_network carries service traffic. No container has a Docker
   socket mount. No proxy, extra worker container, or public DB/API is required.
 
@@ -34,7 +32,6 @@ Persistence and startup
 - game_bridge (named volume) carries the allowlisted operation request,
   stage, boot ID, heartbeat, interpreted event inputs and log spool.
   The supervisor processes only known operations; it never controls Docker.
-- beekeeper_config saves local connection settings; it can be recreated.
 - PostgreSQL starts and must pass an authenticated SELECT before migrations.
   The checksummed schema_migrations ledger records verified legacy baselines
   or migrations applied under transactions and a PostgreSQL advisory lock.
@@ -84,7 +81,7 @@ Configuration inventory
   RWT_POSTGRES_ENV_FILE, RWT_GAME_DATA (managed paths); RIMWORLD_API_DB_NAME,
   RIMWORLD_API_DB_PASSWORD (secret), RIMWORLD_API_TOKEN (secret).
 - Network: RIMWORLD_HOST_PORT/BIND, RIMWORLD_PUBLIC_HOST, RIMWORLD_WEB_PORT/BIND,
-  BEEKEEPER_WEB_PORT, RWT_BEEKEEPER_ENABLED (0/1).
+  Optional public dashboard binding requires deliberate configuration.
 - Runtime options: TZ; POSTGRES_VERSION (pinned on first VPS installation);
   RWT_WEB_MEMORY, RWT_API_MEMORY, RWT_POSTGRES_MEMORY, RWT_GAME_MEMORY,
   RWT_GAME_CPUS (0/unset = no extra Compose limit).
@@ -97,7 +94,7 @@ Configuration inventory
   (true only behind HTTPS), optional DASHBOARD_ORIGIN (exact browser origin,
   including scheme/port).
 - Direct compose.prod.yaml use: RWT_WEB_IMAGE, RWT_API_IMAGE,
-  RWT_RIMWORLD_IMAGE, RWT_BEEKEEPER_IMAGE; set immutable references.
+  RWT_RIMWORLD_IMAGE; set immutable references.
   Managed release deployments use a validated per-service overlay for mixed
   versions. Use project scripts to preserve release state and rollback.
 
@@ -109,3 +106,16 @@ Limitations
 - TCP readiness does not verify actual RimWorld client login or save
   compatibility. Keep the upstream game version pinned until a separate
   maintenance and compatibility test with real clients/saves.
+
+Update 2026-11-19
+- Four services: web, api, postgres, rimworld. Beekeeper service/build/release target
+  removed. Existing Beekeeper named volumes can be archived separately.
+- Overview displays native ModConfig.ModConfigs, awaiting the world creator or
+  Admin Panel when empty. This is the mod policy recorded by the dedicated server.
+- Fresh defaults and Factory reset use the official Site and Road defaults (enabled).
+  Road uploads are required by the native first-world generation protocol.
+- Server data, below Config server, exposes world_config, server_log, player_data,
+  player_online_sample and worker_sample to superusers through read-only SELECTs.
+  Fifty rows/page, one-minute refresh, nested config JSON, no auth/session tables.
+
+Update 2026-11-20: restored official Site/Road behavior, including first-world road upload.

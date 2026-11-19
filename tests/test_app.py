@@ -121,6 +121,36 @@ def test_db_timeout_reports_generic_503(monkeypatch):
     assert "private" not in response.text
 
 
+def test_game_tables_reject_auth_and_non_admin_access():
+    client = TestClient(main.app)
+    assert client.get("/data-tables").status_code == 401
+    main.app.dependency_overrides[main.user] = lambda: "user"
+    try:
+        assert client.get("/data-tables").status_code == 403
+        main.app.dependency_overrides[main.user] = lambda: "superuser"
+        assert len(client.get("/data-tables").json()["tables"]) == 5
+        assert client.get("/data-rows/user_profile").status_code == 404
+        assert client.get("/data-rows/dashboard_sessions").status_code == 404
+        assert client.get("/data-rows/world_config?page=-1").status_code == 422
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+def test_factory_reset_restores_native_site_and_road(tmp_path, monkeypatch):
+    game = tmp_path / "game"
+    for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json"):
+        target = game / file
+        target.parent.mkdir(parents=True, exist_ok=True)
+        rwt_files.write_json(target, {"IsEnabled": False})
+    source = tmp_path / "defaults.json"
+    rwt_files.write_json(source, {file: {"IsEnabled": True} for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json")})
+    monkeypatch.setattr(rwt_files, "FACTORY_DEFAULTS", source)
+    monkeypatch.setattr(rwt_files, "EDITABLE", {file: {"IsEnabled": rwt_files.BOOL} for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json")})
+    rwt_files.restore_factory_defaults(game)
+    for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json"):
+        assert rwt_files.read_json(game / file)["IsEnabled"] is True
+
+
 def test_migration_script_has_lock_and_legacy_seed_is_non_destructive():
     result = db.script("apply")
     assert result.index("pg_advisory_lock") < result.index("INSERT INTO schema_migrations")
