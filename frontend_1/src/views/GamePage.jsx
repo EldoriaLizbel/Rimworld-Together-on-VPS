@@ -316,7 +316,7 @@ export function GameConfig({ c }) {
     if (["rejected", "waiting"].includes(result.status) || overview.status === "failed") {
       setFailure(result.message || "The restart could not be confirmed. Check Server log.");
     } else if (result.status === "applied" && overview.status === "ready") {
-      setNotice(result.kind === "factory-reset" ? "Official defaults restored. The game server is ready." : "The game server is ready.");
+      setNotice(result.kind === "factory-reset" ? "World reset complete. Waiting for the first player to create a new world." : "The game server is ready.");
     } else {
       return;
     }
@@ -344,7 +344,8 @@ export function GameConfig({ c }) {
     try {
       if (action === "restart" || action === "factory-reset") {
         const result = await request(`${action}${expected}`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: action }),
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(action === "factory-reset" ? { confirm: action, erase_world: "RESET WORLD" } : { confirm: action }),
         });
         setOperation(result.operation.id);
         setNotice(action === "factory-reset" ? "Factory reset requested. Waiting for the game server." : "Restart requested. Waiting for the game server.");
@@ -371,9 +372,9 @@ export function GameConfig({ c }) {
     file === "Configs/BackupConfig.json" && ["Amount", "AutomaticDeletion"].includes(key));
   const dialogs = {
     "factory-reset": {
-      title: "Restore server defaults and restart?", label: "Confirm factory reset",
-      message: "This replaces editable server settings, clears the game password and saved edits, disconnects players, and starts a new log history. " +
-        "Official defaults enable Sites, Roads, public listing and telemetry. World data, saves, accounts and mod lists are kept.",
+      title: "Reset the world and restart?", label: "Reset world", confirmText: "RESET WORLD",
+      message: "The game will disconnect players, archive its current files, and clear the world, seed, saves, game players, modlist, settings and game history. " +
+        "The next player will create a new world. Dashboard sign-in accounts are kept. If archiving fails, the reset stops.",
     },
     restart: { title: "Restart the game server?", label: "Confirm restart",
       message: "Connected players will be disconnected. Ask them to save first." +
@@ -483,7 +484,7 @@ export function GameConfig({ c }) {
       <section className={`rt-panel flex flex-wrap items-center justify-between gap-3 rounded-xl p-4 ${c.card} ${c.title}`}>
         <div>
           <h2 className="text-sm font-semibold">Factory reset</h2>
-          <p className={`text-xs ${c.label}`}>Restore official server defaults, then restart the game server.</p>
+          <p className={`text-xs ${c.label}`}>Start a new world. Removes active game players, saves, modlist, settings and history after archiving the current game files.</p>
         </div>
         <button type="button" disabled={!editable || overview?.status !== "ready" || changes.length > 0 || Boolean(password)}
           onClick={() => setConfirmation("factory-reset")} className="rt-button rt-danger-button">Factory reset</button>

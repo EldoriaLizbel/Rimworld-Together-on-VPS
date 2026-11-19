@@ -324,6 +324,7 @@ class PlayerReset(BaseModel):
 class FactoryConfirmation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm: Literal["factory-reset"]
+    erase_world: Literal["RESET WORLD"]
 
 
 @app.post("/factory-reset", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(administrator)])
@@ -331,7 +332,7 @@ async def factory_reset(request: Request, confirmation: FactoryConfirmation, sta
     async with request.app.state.operation_lock:
         boot = require_idle(ready=True)
         checked_stage(staged_id)
-        return await enqueue(boot, "factory-reset", staged_id=staged_id)
+        return await enqueue(boot, "factory-reset", staged_id=staged_id, erase_world=confirmation.erase_world)
 
 
 @app.post("/player-reset", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(administrator)])

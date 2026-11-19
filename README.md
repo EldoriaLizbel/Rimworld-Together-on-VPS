@@ -98,3 +98,9 @@ Overview แสดง Modlist ที่เซิร์ฟเวอร์บั�
 หน้า Server data อยู่ใต้ Config server สำหรับ super-user ดู world_config, server_log, player_data, player_online_sample และ worker_sample แบบอ่านอย่างเดียว แบ่งหน้าและอัปเดตทุกนาที ข้อมูลบัญชีและ session ไม่อยู่ในรายการนี้
 
 ค่าเริ่มต้นและ Factory reset ใช้ค่าจาก binary รุ่นที่ตรึงไว้ รวมถึงเปิด Site และถนน เพื่อรองรับการสร้างโลกตามกระบวนการเดิมของเกม
+
+## Factory reset
+
+Factory reset เริ่มโลกใหม่ทั้งหมด หลังยืนยันด้วยการพิมพ์ `RESET WORLD` จะหยุดเกม ย้ายไฟล์เกมเดิมไปสำรองแบบส่วนตัว แล้วล้างโลก seed เซฟ ผู้เล่นในเกม Modlist การตั้งค่า และประวัติเกมใน Dashboard ก่อนเริ่มใหม่ ผู้เล่นคนแรกกำหนดโลกและม็อดใหม่อีกครั้ง บัญชีล็อกอิน Dashboard ยังใช้จัดการระบบได้
+
+ไฟล์เกมเดิมอยู่ใน `.rwt-deploy/game/.factory-resets/<operation-id>/` บน VPS หรือ game data mount ที่ตั้งไว้ เก็บไว้นอกชุดข้อมูลที่เกมใช้งาน ปุ่มนี้ไม่ย้อนค่าของ Docker, network หรือ credentials ของ Dashboard หากสำรองไฟล์เกมไม่สำเร็จ ระบบจะหยุดการรีเซ็ต

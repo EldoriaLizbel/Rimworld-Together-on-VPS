@@ -41,7 +41,8 @@ def safe_read(path):
         return {}
 
 
-def read_players(game=GAME):
+def read_players(game=GAME, reset_id=None):
+    login_directory = LOGINS / reset_id if reset_id else LOGINS
     settlements = defaultdict(set)
     for file in (game / "Assets/Settlements").glob("*.json"):
         data = safe_read(file)
@@ -52,7 +53,7 @@ def read_players(game=GAME):
         username = safe_read(file).get("Username")
         if not isinstance(username, str) or not username or username != file.stem:
             continue
-        login = safe_read(LOGINS / f"{hashlib.sha256(username.encode()).hexdigest()}.json")
+        login = safe_read(login_directory / f"{hashlib.sha256(username.encode()).hexdigest()}.json")
         save = game / "Assets/Saves" / file.name
         tiles = tuple(sorted(settlements[username]))
         name = count = last_save = None
@@ -99,26 +100,42 @@ def read_streams(epoch, offsets, cutoff):
 
 
 async def synchronize(pool):
-    boot, _, status = current_state()
+    boot, pending, status = current_state()
+    if pending and pending.get("kind") == "factory-reset":
+        return
     settings = None
     if status == "ready":
         try:
             settings = await asyncio.to_thread(read_settings, GAME)
         except (OSError, ValueError):
             LOG.warning("RimWorld settings are temporarily unreadable")
-    players = await asyncio.to_thread(read_players)
+    players = await asyncio.to_thread(read_players, GAME, boot.get("world_reset_id")) if status == "ready" else []
     cutoff = now() - timedelta(days=7)
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
+            reset_id = boot.get("world_reset_id")
+            if settings and reset_id:
+                await cur.execute("SELECT world_reset_id FROM world_config FOR UPDATE")
+                stored = await cur.fetchone()
+                if not stored or not stored["world_reset_id"] or stored["world_reset_id"].hex != reset_id:
+                    # Same transaction as the replacement snapshot. Dashboard
+                    # authentication tables are outside the game data lifecycle.
+                    await cur.execute("""
+                        DELETE FROM player_data;
+                        DELETE FROM player_online_sample;
+                        DELETE FROM worker_sample;
+                        DELETE FROM server_log;
+                        DELETE FROM world_config;
+                        """)
             if settings:
                 await cur.execute("""
-                    INSERT INTO world_config (revision, settings, world_initialized, boot_id) VALUES (%s, %s, %s, %s)
+                    INSERT INTO world_config (revision, settings, world_initialized, boot_id, world_reset_id) VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (singleton) DO UPDATE SET revision = EXCLUDED.revision,
                         settings = EXCLUDED.settings, world_initialized = EXCLUDED.world_initialized,
-                        boot_id = EXCLUDED.boot_id, updated_at = now()
+                        boot_id = EXCLUDED.boot_id, world_reset_id = EXCLUDED.world_reset_id, updated_at = now()
                     WHERE (world_config.revision, world_config.boot_id)
                     IS DISTINCT FROM (EXCLUDED.revision, EXCLUDED.boot_id)
-                    """, (revision(settings), Jsonb(settings), WORLD in settings, boot["id"]))
+                    """, (revision(settings), Jsonb(settings), WORLD in settings, boot["id"], reset_id))
             if players:
                 await cur.executemany("""
                     INSERT INTO player_data (username, settlement_tiles, last_login, last_save, colony_name, colonist_count)

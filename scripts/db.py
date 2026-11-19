@@ -13,6 +13,7 @@ TABLES = {
     5: {"player_online_sample": "sampled_at boot_id online_players player_count session_counts last_log_id"},
     6: {"worker_sample": "sampled_at ram_used_bytes ram_available_bytes game_boot_id game_uptime_seconds"},
     7: {"dashboard_sessions": "token_hash username expires_at", "dashboard_login_budget": "bucket attempts expires_at"},
+    8: {"world_config": "world_reset_id"},
 }
 INDEXES = {4: ("server_log_timeline_idx",), 5: ("player_online_sample_boot_time_idx",),
            7: ("dashboard_sessions_expiry_idx",)}

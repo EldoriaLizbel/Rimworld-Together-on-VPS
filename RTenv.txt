@@ -65,10 +65,15 @@ Dashboard
   membership/load order and event definition IDs are not editable here.
   Road/site/event prices use Silver; cooldowns use milliseconds; backup
   schedule uses hours.
-- Factory reset restores dashboard-editable native fields and game password
-  to defaults from the pinned binary and restarts only the game. Default
-  server-listing/telemetry settings come from upstream. World, saves, mod
-  membership and accounts remain intact.
+- Factory reset archives the stopped game's Assets, Configs, Logs and Backups
+  into .factory-resets/<operation-id>/ inside the game data mount, then starts
+  the pinned binary with a blank world. Native game users, saves, seed, mods,
+  events, roads/sites and settings are removed from active state.
+  The API clears world_config, player_data, server_log, player_online_sample
+  and worker_sample once for the new world generation, in one transaction.
+  Dashboard auth accounts and sessions remain separate.
+  Requires both superuser authorization and typed RESET WORLD confirmation.
+  Backup failure prevents world creation. Archives are private recovery files.
 - Player accounts: dashboard users and game users are distinct. A confirmed
   native resetplayer clears that player's active game data after the game's
   backup. It keeps the game login and dashboard account. No mass reset is
@@ -119,3 +124,5 @@ Update 2026-11-19
   Fifty rows/page, one-minute refresh, nested config JSON, no auth/session tables.
 
 Update 2026-11-20: restored official Site/Road behavior, including first-world road upload.
+
+Update 2026-11-20: Factory reset now resets the full world and native game player/mod data. Game directories are archived privately before reset.

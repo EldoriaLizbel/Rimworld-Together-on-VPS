@@ -14,6 +14,7 @@ import rwt_files
 import safe_backup
 from save_summary import unpack_save
 import supervisor
+import world_reset
 
 os.environ.setdefault("RIMWORLD_API_TOKEN", "temporary-internal-test-token")
 import main  # noqa: E402
@@ -136,19 +137,74 @@ def test_game_tables_reject_auth_and_non_admin_access():
         main.app.dependency_overrides.clear()
 
 
-def test_factory_reset_restores_native_site_and_road(tmp_path, monkeypatch):
+def test_world_reset_archives_every_native_directory_and_is_repeatable(tmp_path):
     game = tmp_path / "game"
-    for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json"):
-        target = game / file
-        target.parent.mkdir(parents=True, exist_ok=True)
-        rwt_files.write_json(target, {"IsEnabled": False})
-    source = tmp_path / "defaults.json"
-    rwt_files.write_json(source, {file: {"IsEnabled": True} for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json")})
-    monkeypatch.setattr(rwt_files, "FACTORY_DEFAULTS", source)
-    monkeypatch.setattr(rwt_files, "EDITABLE", {file: {"IsEnabled": rwt_files.BOOL} for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json")})
-    rwt_files.restore_factory_defaults(game)
-    for file in ("Configs/Actions/Site.json", "Configs/Actions/Road.json"):
-        assert rwt_files.read_json(game / file)["IsEnabled"] is True
+    reset_id = "b" * 32
+    for name in world_reset.RESET_DIRECTORIES:
+        directory = game / name
+        directory.mkdir(parents=True)
+        (directory / "fixture").write_bytes(name.encode())
+    world_reset.reset_world(game, reset_id)
+    for name in world_reset.RESET_DIRECTORIES:
+        assert not (game / name).exists()
+        assert (game / ".factory-resets" / reset_id / name / "fixture").read_bytes() == name.encode()
+    (game / "Assets").mkdir()
+    (game / "Assets/new-world").write_bytes(b"keep on retry")
+    world_reset.reset_world(game, reset_id)
+    assert (game / "Assets/new-world").read_bytes() == b"keep on retry"
+
+
+def test_world_reset_recovers_failed_move_and_rejects_symlinks(tmp_path, monkeypatch):
+    game = tmp_path / "game"
+    (game / "Assets").mkdir(parents=True)
+    (game / "Configs").mkdir()
+    original = world_reset.os.replace
+
+    def fail_configs(source, target):
+        if source == game / "Configs":
+            raise OSError("fixture move failure")
+        return original(source, target)
+
+    monkeypatch.setattr(world_reset.os, "replace", fail_configs)
+    with pytest.raises(OSError):
+        world_reset.reset_world(game, "c" * 32)
+    assert (game / "Assets").is_dir()
+    monkeypatch.setattr(world_reset.os, "replace", original)
+    (game / "Configs").rmdir()
+    (game / "Configs").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ValueError, match="linked"):
+        world_reset.reset_world(game, "c" * 32)
+
+
+def test_factory_reset_requires_explicit_world_erasure():
+    client = TestClient(main.app)
+    main.app.dependency_overrides[main.user] = lambda: "superuser"
+    try:
+        assert client.post("/factory-reset", json={"confirm": "factory-reset"}).status_code == 422
+        assert client.post("/factory-reset", json={"confirm": "factory-reset", "erase_world": "wrong"}).status_code == 422
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+def test_world_reset_resumes_after_process_interruption(tmp_path, monkeypatch):
+    game = tmp_path / "game"
+    (game / "Assets").mkdir(parents=True)
+    (game / "Configs").mkdir()
+    original = world_reset.os.replace
+
+    def interrupt_configs(source, target):
+        if source == game / "Configs":
+            raise KeyboardInterrupt
+        return original(source, target)
+
+    monkeypatch.setattr(world_reset.os, "replace", interrupt_configs)
+    with pytest.raises(KeyboardInterrupt):
+        world_reset.reset_world(game, "d" * 32)
+    assert not (game / "Assets").exists()
+    monkeypatch.setattr(world_reset.os, "replace", original)
+    world_reset.reset_world(game, "d" * 32)
+    assert not (game / "Configs").exists()
+    assert (game / ".factory-resets" / ("d" * 32) / "Assets").exists()
 
 
 def test_migration_script_has_lock_and_legacy_seed_is_non_destructive():

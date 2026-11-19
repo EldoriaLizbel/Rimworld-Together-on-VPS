@@ -1,5 +1,7 @@
 # รายงานส่งมอบ: การเตรียม RimWorld Together on VPS
 
+อัปเดต 2026-11-20 — Factory reset เปลี่ยนเป็นล้างโลกและข้อมูลผู้เล่น/ม็อดทั้งหมดใน active game state หลังเก็บไฟล์สำรองแบบส่วนตัว รายงานด้านล่างบันทึกผลของระบบก่อนการเปลี่ยนนี้ อ่านวิธีใช้ปัจจุบันใน README.md และ operations.md
+
 ขอบเขต: working copy, โค้ด workflow และการทดสอบกับ Docker โปรเจกต์ชั่วคราว ไม่ได้ push, เปิด firewall, เปลี่ยน DNS, ตั้ง GitHub Secrets หรือเชื่อมต่อ production VPS
 
 ## A. ผลตรวจ repository

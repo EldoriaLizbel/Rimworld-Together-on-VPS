@@ -13,9 +13,10 @@ from pathlib import Path
 
 from rwt_files import (
     ANSI, BOOT, GAME_USERNAME, IDENTIFIER, LOGINS, LOGIN_LINE, LOG_PREFIX, REQUEST, SPOOL, STAGED, WORLD,
-    apply_password, now, prepare_password, prepare_updates, read_json, read_settings, restore_factory_defaults,
+    apply_password, now, prepare_password, prepare_updates, read_json, read_settings,
     revision, write_json, write_settings_batch,
 )
+from world_reset import reset_world
 
 GAME = Path("/Data")
 READY = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] \| Listening for users at (.+):(\d+)$")
@@ -40,6 +41,7 @@ class GameLog:
         self.version = None
         self.port = None
         self.reset_player = None
+        self.login_directory = LOGINS / state["world_reset_id"] if state.get("world_reset_id") else LOGINS
 
     def record(self, line, management=False):
         print(line, flush=True)
@@ -57,8 +59,8 @@ class GameLog:
         if match := LOGIN_LINE.match(message):
             username = match[1]
             digest = hashlib.sha256(username.encode()).hexdigest()
-            LOGINS.mkdir(exist_ok=True)
-            write_json(LOGINS / f"{digest}.json", {"username": username, "at": entry["at"]})
+            self.login_directory.mkdir(parents=True, exist_ok=True)
+            write_json(self.login_directory / f"{digest}.json", {"username": username, "at": entry["at"]})
         if message.startswith("[Reset player] > "):
             self.reset_player = message.removeprefix("[Reset player] > ")
         if match := VERSION.match(text):
@@ -93,6 +95,7 @@ def initialize():
     old_result = previous.get("operation")
     result = old_result
     changed = False
+    world_reset_id = previous.get("world_reset_id")
     if request and (not old_result or request["id"] != old_result["id"]):
         result = {"id": request["id"], "status": "applied", "kind": request["kind"]}
         try:
@@ -111,14 +114,21 @@ def initialize():
                 apply_password(GAME, request["digest"])
                 changed = True
             elif request["kind"] == "factory-reset":
-                if (read_json(STAGED) or {}).get("id") != request.get("staged_id"):
-                    raise ValueError("The staged configuration changed before reset")
-                restore_factory_defaults(GAME)
+                if request.get("erase_world") != "RESET WORLD":
+                    raise ValueError("World reset was not explicitly confirmed")
+                world_reset_id = reset_world(GAME, request["id"])
+                result["backup"] = f".factory-resets/{world_reset_id}"
                 STAGED.unlink(missing_ok=True)
                 changed = True
             elif request["kind"] != "restart":
                 raise ValueError("Unsupported management operation")
         except (OSError, ValueError, KeyError, TypeError):
+            if request["kind"] == "factory-reset" and request.get("erase_world") == "RESET WORLD":
+                # Preserve the pending request for recovery. Never launch the
+                # binary against a partially archived world.
+                previous["status"] = "failed"
+                write_json(BOOT, previous)
+                raise
             result["status"] = "rejected"
             result["message"] = "The active settings did not match the queued operation"
 
@@ -136,6 +146,7 @@ def initialize():
         "status": "starting", "started_at": now().isoformat(),
         "operation": result, "world_initialized": world_exists,
         "fingerprint": fingerprint,
+        "world_reset_id": world_reset_id,
     }
     write_json(BOOT, state)
     if request:

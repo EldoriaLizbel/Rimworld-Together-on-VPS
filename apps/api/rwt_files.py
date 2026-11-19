@@ -281,26 +281,3 @@ def write_settings_batch(documents):
         for path in reversed(written):
             write_json(path, originals[path])
         raise
-
-
-def restore_factory_defaults(game):
-    defaults = read_json(FACTORY_DEFAULTS)
-    settings = read_settings(game)
-    changes = []
-    for file, fields in EDITABLE.items():
-        if file not in settings:
-            continue  # The official binary recreates missing configuration files.
-        for key in fields:
-            current, field = setting_target(settings[file], key)
-            default, _ = setting_target(defaults[file], key)
-            if current[field] != default[field]:
-                changes.append({"file": file, "key": key, "value": default[field], "previous": current[field]})
-    documents = prepare_updates(game, changes)
-    password_path = game / PASSWORD_FILE
-    if password_path.resolve() != password_path:
-        raise ValueError("Invalid password config path")
-    password = read_json(password_path)
-    if password is not None:
-        password["Password"] = defaults[PASSWORD_FILE]["Password"]
-        documents[password_path] = password
-    write_settings_batch(documents)

@@ -5,7 +5,7 @@ from fastapi import HTTPException, Query, Request
 from psycopg import sql
 
 TABLES = {
-    "world_config": ("World configuration", ("singleton", "revision", "settings", "world_initialized", "updated_at", "boot_id"), ("updated_at",)),
+    "world_config": ("World configuration", ("singleton", "revision", "settings", "world_initialized", "updated_at", "boot_id", "world_reset_id"), ("updated_at",)),
     "server_log": ("Server logs", ("id", "epoch", "boot_id", "stream", "byte_offset", "occurred_at", "category", "description"), ("occurred_at", "id")),
     "player_data": ("Player metadata", ("username", "colony_name", "colonist_count", "settlement_tiles", "last_login", "last_save", "updated_at"), ("username",)),
     "player_online_sample": ("Player history", ("sampled_at", "boot_id", "online_players", "player_count", "session_counts", "last_log_id"), ("sampled_at",)),

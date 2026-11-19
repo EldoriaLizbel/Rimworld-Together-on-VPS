@@ -13,7 +13,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 RUN apt-get update && apt-get install -y --no-install-recommends python3 \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -m 0770 -o 10001 -g 10001 /bridge
-COPY supervisor.py rwt_files.py factory_defaults.py /opt/rwt/
+COPY supervisor.py rwt_files.py factory_defaults.py world_reset.py /opt/rwt/
 RUN --network=none /usr/bin/python3 /opt/rwt/factory_defaults.py
 WORKDIR /Data
 ENTRYPOINT ["/usr/bin/python3", "/opt/rwt/supervisor.py"]
